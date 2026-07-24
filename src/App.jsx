@@ -1,18 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   Camera,
-  Zap,
   Share2,
   ArrowRight,
   CheckCircle,
-  X,
   BarChart3,
-  Brain,
   Home,
   Menu,
   BookOpen,
-  Target,
-  TrendingUp
 } from 'lucide-react';
 
 const MizanBrandedApp = () => {
@@ -235,7 +230,7 @@ const MizanBrandedApp = () => {
   // ==================== SCANNER SCREEN ====================
   const ScannerScreen = () => {
     return (
-      <div className="min-h-screen" style={{ background: `linear-gradient(135deg, ${brandColors.deepTeal}, ${brandColors.darkGreen})` }} className="flex flex-col items-center justify-center px-6">
+      <div className="min-h-screen" style={{ background: `linear-gradient(135deg, ${brandColors.deepTeal}, ${brandColors.darkGreen})` }} >
         {/* Animated Loader */}
         <div className="relative w-32 h-32 mb-12">
           <div className="absolute inset-0 rounded-full border-4 border-white border-opacity-30"></div>
@@ -291,7 +286,7 @@ const MizanBrandedApp = () => {
     const currentFeedback = feedbackTabs[activeTab];
 
     return (
-      <div className="min-h-screen" style={{ background: `linear-gradient(135deg, ${brandColors.lightTeal} 0%, white 100%)` }} className="pb-24">
+      <div className="min-h-screen" style={{ background: `linear-gradient(135deg, ${brandColors.lightTeal} 0%, white 100%)` }} >
         {/* Header */}
         <div className="sticky top-0 z-50 backdrop-blur-sm" style={{ backgroundColor: brandColors.deepTeal }}>
           <div className="px-6 py-4 flex items-center justify-between">
