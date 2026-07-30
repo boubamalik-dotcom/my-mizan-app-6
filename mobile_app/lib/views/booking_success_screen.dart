@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
 import 'package:el_mizan_real_estate/models/inspection_booking.dart';
 import 'package:el_mizan_real_estate/theme/app_theme.dart';
@@ -61,7 +61,7 @@ class BookingSuccessScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(28),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.12),
+                          color: Colors.black.withValues(alpha: 0.12),
                           blurRadius: 24,
                           offset: const Offset(0, 12),
                         ),
@@ -101,7 +101,7 @@ class BookingSuccessScreen extends StatelessWidget {
                             color: AppColors.mist,
                             borderRadius: BorderRadius.circular(18),
                             border: Border.all(
-                              color: AppColors.lagoon.withOpacity(0.25),
+                              color: AppColors.lagoon.withValues(alpha: 0.25),
                             ),
                           ),
                           child: Column(

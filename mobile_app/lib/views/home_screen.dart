@@ -57,13 +57,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     setState(() => _listening = true);
     await _speech.listen(
-      localeId: 'ar_DZ',
       onResult: (result) {
         setState(() => _searchController.text = result.recognizedWords);
         if (result.finalResult) {
           _runSearch();
         }
       },
+      listenOptions: stt.SpeechListenOptions(localeId: 'ar_DZ'),
     );
   }
 
@@ -205,9 +205,9 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.88),
+          color: Colors.white.withValues(alpha: 0.88),
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppColors.lagoon.withOpacity(0.15)),
+          border: Border.all(color: AppColors.lagoon.withValues(alpha: 0.15)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -239,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: _toggleVoice,
                   style: IconButton.styleFrom(
                     backgroundColor: _listening
-                        ? AppColors.high.withOpacity(0.2)
+                        ? AppColors.high.withValues(alpha: 0.2)
                         : AppColors.mist,
                   ),
                   icon: Icon(

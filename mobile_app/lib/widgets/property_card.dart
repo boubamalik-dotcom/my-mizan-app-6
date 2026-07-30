@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
 import 'package:el_mizan_real_estate/models/property.dart';
 import 'package:el_mizan_real_estate/theme/app_theme.dart';
@@ -34,12 +34,12 @@ class PropertyCard extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: AppColors.deepSea.withOpacity(0.08),
+                color: AppColors.deepSea.withValues(alpha: 0.08),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
             ],
-            border: Border.all(color: Colors.white.withOpacity(0.7)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),

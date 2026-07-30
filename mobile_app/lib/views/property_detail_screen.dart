@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
 import 'package:el_mizan_real_estate/models/property.dart';
 import 'package:el_mizan_real_estate/services/api_service.dart';
@@ -292,9 +292,9 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
+        color: Colors.white.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.lagoon.withOpacity(0.12)),
+        border: Border.all(color: AppColors.lagoon.withValues(alpha: 0.12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -13,10 +13,16 @@
 ## التشغيل
 
 ```bash
-flutter pub get
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000   # Android emulator
-# أو
-flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8000  # iOS / desktop
+# نافذة 1 — Backend
+cd backend && uvicorn app.main:app --reload
+
+# نافذة 2 — تطبيق الهاتف
+cd mobile_app && flutter run
 ```
 
-تأكد من تشغيل خادم الـ backend على المنفذ `8000`.
+اختياري لتحديد عنوان الـ API:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000   # Android emulator
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8000  # iOS / desktop
+```

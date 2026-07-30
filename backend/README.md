@@ -14,7 +14,13 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload
+```
+
+تشغيل تطبيق الهاتف (نافذة طرفية أخرى):
+
+```bash
+cd mobile_app && flutter run
 ```
 
 ## نماذج قاعدة البيانات
