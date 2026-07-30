@@ -17,6 +17,18 @@ pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+## نماذج قاعدة البيانات
+
+| الجدول | الوصف |
+|--------|--------|
+| `users` | مشترٍ / بائع / وسيط |
+| `properties` | عقارات وهران (بئر الجير، العقيد لطفي، USTO، الكورنيش) |
+| `inspections` | معاينات مع عمولة الميزان 1.5% عند `commission_agreed=true` |
+
+تُنشأ الجداول تلقائياً عند تشغيل التطبيق عبر `init_db()`.
+
+الافتراضي محلياً: SQLite (`el_mizan.db`). للإنتاج عيّن `DATABASE_URL` إلى PostgreSQL.
+
 ## المسارات التجريبية
 
 | Method | Path | Description |

@@ -47,6 +47,8 @@ backend/venv/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+backend/*.db
+backend/**/*.db
 
 # Flutter
 mobile_app/.dart_tool/

@@ -3,15 +3,27 @@ El Mizan Real Estate — Backend API
 وسيط عقاري ذكي لمدينة وهران يعمل بمنطق الميزان
 """
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.database import init_db
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Create database tables on startup."""
+    init_db()
+    yield
+
+
 app = FastAPI(
     title="El Mizan Real Estate API",
     description="وسيط عقاري ذكي لمدينة وهران — منطق الميزان",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
