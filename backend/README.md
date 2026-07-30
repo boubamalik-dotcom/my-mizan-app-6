@@ -29,6 +29,15 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 الافتراضي محلياً: SQLite (`el_mizan.db`). للإنتاج عيّن `DATABASE_URL` إلى PostgreSQL.
 
+## منطق الميزان (AI)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/ai/evaluate-price` | ميزان السعر قبل نشر العقار |
+| POST | `/api/v1/ai/parse-prompt` | تحويل الدارجة الوهرانية إلى استعلام بحث |
+
+المحرك: `app/services/ai_engine.py` — يستخدم OpenAI عند توفر `OPENAI_API_KEY`، وإلا يعمل بمحرك محلي احتياطي لمعدلات أحياء وهران.
+
 ## المسارات التجريبية
 
 | Method | Path | Description |
