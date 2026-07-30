@@ -12,4 +12,4 @@ Standard commands (see `package.json`):
 
 Non-obvious notes:
 - `src/index.js` imports `./App`, which resolves to `src/App.jsx` (CRA resolves the `.jsx` extension automatically).
-- Known pre-existing app bug (do not "fix" as part of setup): the scanner screen's progress `useEffect` in `src/App.jsx` guards on `scanProgress < 100`, so once progress overshoots 100 the auto-transition to the results screen never fires. The core dashboard → scanner flow and animations work; the results screen is normally unreachable from the scanner without code changes.
+- Core flow: dashboard → tap "صوّر إجابتك الآن" → scanner screen animates the 5 layers to 100% → auto-transitions to the results screen (with feedback tabs). The scanner progress `useEffect` in `src/App.jsx` caps progress at 100 and schedules the transition once it reaches 100.
