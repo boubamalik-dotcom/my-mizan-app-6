@@ -38,6 +38,15 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 المحرك: `app/services/ai_engine.py` — يستخدم OpenAI عند توفر `OPENAI_API_KEY`، وإلا يعمل بمحرك محلي احتياطي لمعدلات أحياء وهران.
 
+## العقارات والمعاينات
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/properties/` | قائمة عامة مع Privacy Shield (بدون هاتف/عنوان دقيق) |
+| POST | `/api/v1/properties/` | نشر عقار + حفظ تقييم الميزان تلقائياً |
+| POST | `/api/v1/inspections/book` | حجز معاينة (يتطلب `commission_agreed=true`) |
+| POST | `/api/v1/inspections/confirm` | تأكيد المالك → نقطة التلاقي + التذكرة المتبادلة |
+
 ## المسارات التجريبية
 
 | Method | Path | Description |
