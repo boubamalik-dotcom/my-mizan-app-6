@@ -18,18 +18,17 @@ const MizanBrandedApp = () => {
 
   // Simulate scan progress
   useEffect(() => {
-    if (screen === 'scanner' && scanProgress < 100) {
-      const timer = setTimeout(() => {
-        setScanProgress(prev => {
-          if (prev >= 100) {
-            setTimeout(() => setScreen('results'), 1500);
-            return 100;
-          }
-          return prev + Math.random() * 25;
-        });
-      }, 400);
-      return () => clearTimeout(timer);
+    if (screen !== 'scanner') return;
+
+    if (scanProgress >= 100) {
+      const transitionTimer = setTimeout(() => setScreen('results'), 1500);
+      return () => clearTimeout(transitionTimer);
     }
+
+    const timer = setTimeout(() => {
+      setScanProgress(prev => Math.min(prev + Math.random() * 25, 100));
+    }, 400);
+    return () => clearTimeout(timer);
   }, [screen, scanProgress]);
 
   // Simulate fatigue changes
