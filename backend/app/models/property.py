@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 
-from sqlalchemy import Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -58,6 +58,8 @@ class Property(Base):
         nullable=False,
         index=True,
     )
+    # تقييم منطق الميزان عند النشر (عادل / مرتفع / منخفض + تعليل)
+    mizan_evaluation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     owner: Mapped["User"] = relationship(
         "User",

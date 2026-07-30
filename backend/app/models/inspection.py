@@ -57,6 +57,9 @@ class Inspection(Base):
         default=generate_inspection_code,
         index=True,
     )
+    # تُملأ فقط بعد تأكيد المالك — نقطة التلاقي (العنوان الدقيق)
+    meeting_point: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     listed_property: Mapped["Property"] = relationship(
         "Property",
