@@ -39,3 +39,25 @@ yarn-error.log*
 
 # Optional eslint cache
 .eslintcache
+
+# Python / FastAPI
+backend/.venv/
+backend/venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+backend/*.db
+backend/**/*.db
+
+# Flutter
+mobile_app/.dart_tool/
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+mobile_app/.packages
+mobile_app/build/
+mobile_app/.pub-cache/
+mobile_app/.pub/
+mobile_app/**/Generated.xcconfig
+mobile_app/**/flutter_export_environment.sh
+*.iml
