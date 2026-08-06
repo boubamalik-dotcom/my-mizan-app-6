@@ -36,6 +36,11 @@ async def get_clinic(db: AsyncSession, clinic_id: uuid.UUID) -> Clinic | None:
     return await db.get(Clinic, clinic_id)
 
 
+async def list_clinics(db: AsyncSession) -> list[Clinic]:
+    result = await db.execute(select(Clinic).order_by(Clinic.created_at))
+    return list(result.scalars().all())
+
+
 # ---------------------------------------------------------------------------
 # Patient
 # ---------------------------------------------------------------------------

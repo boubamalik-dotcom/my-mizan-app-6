@@ -14,6 +14,15 @@ from app.socket_manager import ConnectionManager
 manager = ConnectionManager()
 
 
+async def _broadcast_clinic_queue(db: AsyncSession, clinic_id: uuid.UUID) -> list[schemas.QueueEntryResponse]:
+    """Fetch a clinic's current queue, broadcast it, and return it (as response models)."""
+    entries = await crud.get_clinic_queue(db, clinic_id)
+    response = [schemas.QueueEntryResponse.model_validate(entry) for entry in entries]
+    queue_payload = [entry.model_dump(mode="json") for entry in response]
+    await manager.broadcast_queue_update(clinic_id, queue_payload)
+    return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Creates tables directly from the ORM models on startup. Handy for local
@@ -58,6 +67,20 @@ async def create_clinic(payload: schemas.ClinicCreate, db: AsyncSession = Depend
     return schemas.ClinicResponse.model_validate(clinic)
 
 
+@app.get("/clinics", response_model=list[schemas.ClinicResponse], tags=["clinics"])
+async def list_clinics(db: AsyncSession = Depends(get_db)) -> list[schemas.ClinicResponse]:
+    clinics = await crud.list_clinics(db)
+    return [schemas.ClinicResponse.model_validate(clinic) for clinic in clinics]
+
+
+@app.get("/clinics/{clinic_id}", response_model=schemas.ClinicResponse, tags=["clinics"])
+async def get_clinic(clinic_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> schemas.ClinicResponse:
+    clinic = await crud.get_clinic(db, clinic_id)
+    if clinic is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+    return schemas.ClinicResponse.model_validate(clinic)
+
+
 @app.post("/patients", response_model=schemas.PatientResponse, status_code=status.HTTP_201_CREATED, tags=["patients"])
 async def create_patient(
     payload: schemas.PatientCreate, db: AsyncSession = Depends(get_db)
@@ -89,7 +112,13 @@ async def join_clinic_queue(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
 
     entry = await crud.add_patient_to_queue(db, clinic_id, payload.patient_id, payload.is_urgent)
-    return schemas.QueueEntryResponse.model_validate(entry)
+    response = schemas.QueueEntryResponse.model_validate(entry)
+
+    # Broadcast so the dashboard updates the moment a patient joins, without
+    # waiting for the next "Call Next Patient" click.
+    await _broadcast_clinic_queue(db, clinic_id)
+
+    return response
 
 
 @app.get(
@@ -120,14 +149,7 @@ async def call_next_patient(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
 
     await crud.advance_queue(db, clinic_id)
-
-    entries = await crud.get_clinic_queue(db, clinic_id)
-    response = [schemas.QueueEntryResponse.model_validate(entry) for entry in entries]
-
-    queue_payload = [entry.model_dump(mode="json") for entry in response]
-    await manager.broadcast_queue_update(clinic_id, queue_payload)
-
-    return response
+    return await _broadcast_clinic_queue(db, clinic_id)
 
 
 @app.websocket("/ws/clinics/{clinic_id}")

@@ -1,4 +1,4 @@
-# Mizan Door — Backend (Step 1 + Step 2)
+# Mizan Door — Backend (Step 1 + Step 2 + Step 3 additions)
 
 FastAPI backend for the Mizan Door smart virtual queue system for clinics.
 
@@ -7,6 +7,10 @@ FastAPI backend for the Mizan Door smart virtual queue system for clinics.
 - **Step 2**: real-time engine — Redis pub/sub, a WebSocket `ConnectionManager`,
   `POST /clinics/{clinic_id}/next` to call the next patient, and
   `WS /ws/clinics/{clinic_id}` for live queue updates.
+- **Step 3 additions**: `GET /clinics` and `GET /clinics/{clinic_id}`, plus
+  broadcasting on `POST /clinics/{clinic_id}/queue` — added to support the
+  React dashboard's clinic picker and its "updates the instant a patient
+  joins" requirement (see `../frontend-web/`).
 
 ## Folder structure
 
@@ -93,8 +97,10 @@ at `http://localhost:8000/docs`.
 | Method | Path | Description |
 |---|---|---|
 | POST | `/clinics` | Create a clinic (`name`, `specialty`) |
+| GET | `/clinics` | List all clinics (used by the dashboard's clinic picker) |
+| GET | `/clinics/{clinic_id}` | Get a single clinic |
 | POST | `/patients` | Register a patient (`name`, `phone` — must be unique, `409` on duplicate) |
-| POST | `/clinics/{clinic_id}/queue` | Add a patient to the clinic's queue (`patient_id`, `is_urgent`) — assigns the next ticket number, scoped per clinic and reset daily |
+| POST | `/clinics/{clinic_id}/queue` | Add a patient to the clinic's queue (`patient_id`, `is_urgent`) — assigns the next ticket number (scoped per clinic, reset daily) and broadcasts the updated queue over the clinic's WebSocket |
 | GET | `/clinics/{clinic_id}/queue` | Get the clinic's current active queue (`waiting` / `in_consultation` entries), urgent first, then by ticket number |
 
 Health checks: `GET /` and `GET /health`.
