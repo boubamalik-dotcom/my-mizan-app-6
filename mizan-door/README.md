@@ -23,8 +23,13 @@ subfolder here.
       TypeScript + Tailwind app with clinic selection, a live queue list,
       a "Call Next Patient" button, and real-time sync over the
       `/ws/clinics/{clinic_id}` WebSocket.
-- [ ] **Step 4 — Patient App** (`mobile_app/`): Flutter + Riverpod app with
-      queue join flow, triage questions, real-time ticket tracking, and
-      push/local notifications.
+- [x] **Step 4 — Patient App** (`frontend_mobile/`): Flutter + Riverpod app
+      with clinic selection, a returning-patient-aware join flow, a 2-part
+      smart triage that sets the urgent flag, and real-time ticket tracking
+      over the `/ws/clinics/{clinic_id}` WebSocket, with an in-app "your
+      turn is near" alert in place of native push notifications (see
+      `frontend_mobile/README.md` for why).
 
-See `backend/README.md` for details on the current step.
+All four MVP steps are implemented. See `backend/README.md`,
+`frontend-web/README.md`, and `frontend_mobile/README.md` for setup and
+implementation details on each piece.

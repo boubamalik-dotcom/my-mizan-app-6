@@ -94,6 +94,16 @@ async def create_patient(
     return schemas.PatientResponse.model_validate(patient)
 
 
+@app.get("/patients/by-phone/{phone}", response_model=schemas.PatientResponse, tags=["patients"])
+async def get_patient_by_phone(phone: str, db: AsyncSession = Depends(get_db)) -> schemas.PatientResponse:
+    """Look up an existing patient by phone number, so the mobile app can let a
+    returning patient join a queue without re-registering on a new device."""
+    patient = await crud.get_patient_by_phone(db, phone)
+    if patient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+    return schemas.PatientResponse.model_validate(patient)
+
+
 @app.post(
     "/clinics/{clinic_id}/queue",
     response_model=schemas.QueueEntryResponse,

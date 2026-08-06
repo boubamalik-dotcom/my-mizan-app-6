@@ -11,6 +11,10 @@ FastAPI backend for the Mizan Door smart virtual queue system for clinics.
   broadcasting on `POST /clinics/{clinic_id}/queue` — added to support the
   React dashboard's clinic picker and its "updates the instant a patient
   joins" requirement (see `../frontend-web/`).
+- **Step 4 addition**: `GET /patients/by-phone/{phone}` — lets the Flutter
+  app reuse an existing patient record by phone number instead of hitting
+  the unique-phone `409` when a returning patient joins from a new device
+  (see `../frontend_mobile/`).
 
 ## Folder structure
 
@@ -100,6 +104,7 @@ at `http://localhost:8000/docs`.
 | GET | `/clinics` | List all clinics (used by the dashboard's clinic picker) |
 | GET | `/clinics/{clinic_id}` | Get a single clinic |
 | POST | `/patients` | Register a patient (`name`, `phone` — must be unique, `409` on duplicate) |
+| GET | `/patients/by-phone/{phone}` | Look up an existing patient by phone (used by the mobile app so a returning patient can join from a new device without re-registering) |
 | POST | `/clinics/{clinic_id}/queue` | Add a patient to the clinic's queue (`patient_id`, `is_urgent`) — assigns the next ticket number (scoped per clinic, reset daily) and broadcasts the updated queue over the clinic's WebSocket |
 | GET | `/clinics/{clinic_id}/queue` | Get the clinic's current active queue (`waiting` / `in_consultation` entries), urgent first, then by ticket number |
 
