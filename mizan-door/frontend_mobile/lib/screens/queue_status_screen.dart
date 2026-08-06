@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -52,14 +53,14 @@ class QueueStatusScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Your Queue Status'),
+        title: Text('queueStatus.title'.tr()),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsetsDirectional.only(end: 8),
             child: Center(child: ConnectionStatusChip(status: queueState.connectionStatus)),
           ),
           IconButton(
-            tooltip: 'Leave',
+            tooltip: 'queueStatus.leave'.tr(),
             icon: const Icon(Icons.logout),
             onPressed: () => _leaveQueue(context, ref),
           ),
@@ -95,7 +96,7 @@ class QueueStatusScreen extends ConsumerWidget {
                   children: [
                     Expanded(
                       child: _StatCard(
-                        label: 'Your number',
+                        label: 'queueStatus.yourNumber'.tr(),
                         value: myEntry != null ? '#${myEntry.queueNumber}' : '—',
                         color: Colors.teal,
                       ),
@@ -103,7 +104,7 @@ class QueueStatusScreen extends ConsumerWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: _StatCard(
-                        label: 'Currently serving',
+                        label: 'queueStatus.currentlyServing'.tr(),
                         value: currentlyServing != null ? '#${currentlyServing.queueNumber}' : '—',
                         color: Colors.blueGrey,
                       ),
@@ -138,7 +139,7 @@ class QueueStatusScreen extends ConsumerWidget {
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                   child: Text(
-                                    'Urgent',
+                                    'joinQueue.urgent'.tr(),
                                     style: TextStyle(
                                         color: Colors.red.shade700,
                                         fontSize: 11,
@@ -162,8 +163,9 @@ class QueueStatusScreen extends ConsumerWidget {
                             const SizedBox(height: 4),
                             Text(
                               patientsAhead == 0
-                                  ? "You're next in line."
-                                  : '$patientsAhead patient${patientsAhead == 1 ? '' : 's'} ahead of you.',
+                                  ? 'queueStatus.nextInLine'.tr()
+                                  : 'queueStatus.patientsAheadCount'
+                                      .tr(namedArgs: {'count': '$patientsAhead'}),
                               style: TextStyle(color: Colors.grey.shade600),
                             ),
                           ],
@@ -187,13 +189,13 @@ class QueueStatusScreen extends ConsumerWidget {
   String _statusLabel(QueueStatus status) {
     switch (status) {
       case QueueStatus.waiting:
-        return 'Waiting';
+        return 'status.waiting'.tr();
       case QueueStatus.inConsultation:
-        return 'In consultation';
+        return 'status.inConsultation'.tr();
       case QueueStatus.completed:
-        return 'Completed';
+        return 'status.completed'.tr();
       case QueueStatus.cancelled:
-        return 'Cancelled';
+        return 'status.cancelled'.tr();
     }
   }
 }
@@ -250,13 +252,13 @@ class _VisitCompleteCard extends StatelessWidget {
           children: [
             Icon(Icons.celebration, color: Colors.teal.shade600, size: 40),
             const SizedBox(height: 12),
-            const Text(
-              'Your visit is complete. Thank you for using Mizan Door!',
+            Text(
+              'queueStatus.visitComplete'.tr(),
               textAlign: TextAlign.center,
-              style: TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
-            FilledButton(onPressed: onDone, child: const Text('Join another queue')),
+            FilledButton(onPressed: onDone, child: Text('queueStatus.joinAnother'.tr())),
           ],
         ),
       ),

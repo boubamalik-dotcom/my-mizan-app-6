@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../providers/queue_controller.dart';
@@ -25,7 +26,7 @@ class ConnectionStatusChip extends StatelessWidget {
           Icon(isOpen ? Icons.wifi : Icons.wifi_off, size: 12, color: color),
           const SizedBox(width: 4),
           Text(
-            isOpen ? 'Live' : 'Reconnecting…',
+            isOpen ? 'connection.live'.tr() : 'connection.reconnecting'.tr(),
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
           ),
         ],

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Phone, Stethoscope } from 'lucide-react'
 import type { QueueEntry } from '../types'
 
@@ -5,13 +6,12 @@ interface QueueEntryCardProps {
   entry: QueueEntry
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  waiting: 'Waiting',
-  in_consultation: 'In consultation',
-}
-
 export default function QueueEntryCard({ entry }: QueueEntryCardProps) {
+  const { t } = useTranslation()
   const isActive = entry.status === 'in_consultation'
+
+  const statusLabel =
+    entry.status === 'in_consultation' ? t('status.inConsultation') : t('status.waiting')
 
   return (
     <div
@@ -32,7 +32,7 @@ export default function QueueEntryCard({ entry }: QueueEntryCardProps) {
             <p className="font-semibold text-slate-900">{entry.patient.name}</p>
             {entry.is_urgent && (
               <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                <AlertTriangle size={12} /> Urgent
+                <AlertTriangle size={12} /> {t('queueEntry.urgent')}
               </span>
             )}
           </div>
@@ -48,7 +48,7 @@ export default function QueueEntryCard({ entry }: QueueEntryCardProps) {
         }`}
       >
         {isActive && <Stethoscope size={12} />}
-        {STATUS_LABELS[entry.status] ?? entry.status}
+        {statusLabel}
       </span>
     </div>
   )

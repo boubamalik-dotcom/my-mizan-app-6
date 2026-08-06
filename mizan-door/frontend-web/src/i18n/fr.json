@@ -1,0 +1,47 @@
+{
+  "app": {
+    "name": "Mizan Door",
+    "tagline": "Tableau de bord de la réception"
+  },
+  "clinicSelect": {
+    "selectClinic": "Sélectionnez votre clinique",
+    "registerNew": "Enregistrer une nouvelle clinique",
+    "noClinics": "Aucune clinique n'est encore enregistrée.",
+    "clinicNameLabel": "Nom de la clinique",
+    "clinicNamePlaceholder": "Clinique Al Amal",
+    "specialtyLabel": "Spécialité",
+    "specialtyPlaceholder": "Médecine générale",
+    "cancel": "Annuler",
+    "createClinic": "Créer la clinique",
+    "connectionError": "Impossible de joindre l'API Mizan Door. Le serveur est-il démarré ?",
+    "createError": "Échec de la création de la clinique. Veuillez réessayer."
+  },
+  "dashboard": {
+    "currentlyServing": "Patient en cours",
+    "waiting": "En attente",
+    "callNext": "Appeler le suivant",
+    "calling": "Appel en cours…",
+    "noPatients": "Aucun patient dans la file pour le moment.",
+    "loadingQueue": "Chargement de la file…",
+    "loadError": "Impossible de charger la file depuis le serveur.",
+    "callNextError": "Échec de l'appel du patient suivant. Veuillez réessayer.",
+    "retry": "Réessayer",
+    "switch": "Changer"
+  },
+  "connection": {
+    "live": "En direct",
+    "reconnecting": "Reconnexion…"
+  },
+  "status": {
+    "waiting": "En attente",
+    "inConsultation": "En consultation"
+  },
+  "queueEntry": {
+    "urgent": "Urgent"
+  },
+  "language": {
+    "toggle": "Langue",
+    "fr": "Français",
+    "ar": "العربية"
+  }
+}

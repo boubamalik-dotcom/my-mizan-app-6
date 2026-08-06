@@ -1,8 +1,13 @@
+// easy_localization re-exports package:intl, which has its own TextDirection
+// class that would otherwise collide with Flutter's (used below for the
+// RTL-aware chevron icon).
+import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/clinic.dart';
 import '../providers/api_providers.dart';
+import '../widgets/language_toggle.dart';
 import 'join_queue_screen.dart';
 
 class ClinicSelectScreen extends ConsumerWidget {
@@ -15,8 +20,11 @@ class ClinicSelectScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Mizan Door'),
+        title: Text('app.name'.tr()),
         centerTitle: false,
+        actions: const [
+          Padding(padding: EdgeInsetsDirectional.only(end: 12), child: LanguageToggle()),
+        ],
       ),
       body: SafeArea(
         child: RefreshIndicator(
@@ -45,18 +53,18 @@ class _ClinicList extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 12, top: 4),
           child: Text(
-            'Select a clinic to join its queue',
+            'clinicSelect.title'.tr(),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
         ),
         if (clinics.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
             child: Center(
               child: Text(
-                'No clinics are registered yet.\nAsk your clinic to set up Mizan Door first.',
+                'clinicSelect.noClinics'.tr(),
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.black54),
+                style: const TextStyle(color: Colors.black54),
               ),
             ),
           )
@@ -77,7 +85,11 @@ class _ClinicList extends StatelessWidget {
                 ),
                 title: Text(clinic.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(clinic.specialty),
-                trailing: const Icon(Icons.chevron_right),
+                trailing: Icon(
+                  Directionality.of(context) == TextDirection.rtl
+                      ? Icons.chevron_left
+                      : Icons.chevron_right,
+                ),
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => JoinQueueScreen(clinic: clinic)),
@@ -106,12 +118,9 @@ class _ErrorState extends StatelessWidget {
           children: [
             Icon(Icons.cloud_off, size: 40, color: Colors.grey.shade400),
             const SizedBox(height: 12),
-            const Text(
-              'Could not reach the Mizan Door server.\nCheck that the backend is running.',
-              textAlign: TextAlign.center,
-            ),
+            Text('clinicSelect.connectionError'.tr(), textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Retry')),
+            FilledButton(onPressed: onRetry, child: Text('clinicSelect.retry'.tr())),
           ],
         ),
       ),

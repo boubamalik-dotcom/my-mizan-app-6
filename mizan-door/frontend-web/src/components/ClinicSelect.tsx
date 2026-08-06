@@ -1,13 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Building2, Loader2, Plus, Stethoscope } from 'lucide-react'
 import { createClinic, listClinics } from '../api'
 import type { Clinic } from '../types'
+import LanguageToggle from './LanguageToggle'
 
 interface ClinicSelectProps {
   onSelect: (clinic: Clinic) => void
 }
 
 export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
+  const { t } = useTranslation()
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -22,9 +25,9 @@ export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
         setClinics(data)
         setShowCreateForm(data.length === 0)
       })
-      .catch(() => setError('Could not reach the Mizan Door API. Is the backend running?'))
+      .catch(() => setError(t('clinicSelect.connectionError')))
       .finally(() => setLoading(false))
-  }, [])
+  }, [t])
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault()
@@ -36,7 +39,7 @@ export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
       const clinic = await createClinic(name.trim(), specialty.trim())
       onSelect(clinic)
     } catch {
-      setError('Failed to create the clinic. Please try again.')
+      setError(t('clinicSelect.createError'))
     } finally {
       setCreating(false)
     }
@@ -45,14 +48,17 @@ export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="rounded-xl bg-emerald-600 p-3 text-white">
-            <Building2 size={24} />
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-emerald-600 p-3 text-white">
+              <Building2 size={24} />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">{t('app.name')}</h1>
+              <p className="text-sm text-slate-500">{t('app.tagline')}</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Mizan Door</h1>
-            <p className="text-sm text-slate-500">Clinic receptionist dashboard</p>
-          </div>
+          <LanguageToggle />
         </div>
 
         {error && (
@@ -67,15 +73,15 @@ export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
           <>
             {clinics.length > 0 && (
               <div className="mb-6 space-y-2">
-                <p className="mb-2 text-sm font-medium text-slate-600">Select your clinic</p>
+                <p className="mb-2 text-sm font-medium text-slate-600">{t('clinicSelect.selectClinic')}</p>
                 {clinics.map((clinic) => (
                   <button
                     key={clinic.id}
                     type="button"
                     onClick={() => onSelect(clinic)}
-                    className="flex w-full items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-left transition-colors hover:border-emerald-500 hover:bg-emerald-50"
+                    className="flex w-full items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-start transition-colors hover:border-emerald-500 hover:bg-emerald-50"
                   >
-                    <Stethoscope size={18} className="text-emerald-600" />
+                    <Stethoscope size={18} className="shrink-0 text-emerald-600" />
                     <div>
                       <p className="font-medium text-slate-900">{clinic.name}</p>
                       <p className="text-xs text-slate-500">{clinic.specialty}</p>
@@ -91,33 +97,33 @@ export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
                 onClick={() => setShowCreateForm(true)}
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 transition-colors hover:border-emerald-500 hover:text-emerald-600"
               >
-                <Plus size={16} /> Register a new clinic
+                <Plus size={16} /> {t('clinicSelect.registerNew')}
               </button>
             ) : (
               <form onSubmit={handleCreate} className="space-y-3">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="clinic-name">
-                    Clinic name
+                    {t('clinicSelect.clinicNameLabel')}
                   </label>
                   <input
                     id="clinic-name"
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                    placeholder="Al Amal Clinic"
+                    placeholder={t('clinicSelect.clinicNamePlaceholder')}
                     required
                   />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="clinic-specialty">
-                    Specialty
+                    {t('clinicSelect.specialtyLabel')}
                   </label>
                   <input
                     id="clinic-specialty"
                     value={specialty}
                     onChange={(event) => setSpecialty(event.target.value)}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                    placeholder="General Medicine"
+                    placeholder={t('clinicSelect.specialtyPlaceholder')}
                     required
                   />
                 </div>
@@ -128,7 +134,7 @@ export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
                       onClick={() => setShowCreateForm(false)}
                       className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                     >
-                      Cancel
+                      {t('clinicSelect.cancel')}
                     </button>
                   )}
                   <button
@@ -137,7 +143,7 @@ export default function ClinicSelect({ onSelect }: ClinicSelectProps) {
                     className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
                   >
                     {creating && <Loader2 size={14} className="animate-spin" />}
-                    Create clinic
+                    {t('clinicSelect.createClinic')}
                   </button>
                 </div>
               </form>

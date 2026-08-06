@@ -1,5 +1,14 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/widgets.dart' show Locale;
 import 'dart:io' as io;
+
+/// Bilingual support (Arabic and French) from Day 1. Arabic is a built-in
+/// RTL language in Flutter, so `MaterialApp` automatically mirrors the
+/// entire UI (text alignment, `Row` order, `Scaffold` drawer edge, etc.)
+/// once `locale` is set to `Locale('ar')` - no manual RTL plumbing needed
+/// beyond setting the locale (see main.dart and widgets/language_toggle.dart).
+const List<Locale> supportedLocales = [Locale('fr'), Locale('ar')];
+const Locale fallbackLocale = Locale('fr');
 
 /// Backend host resolution.
 ///

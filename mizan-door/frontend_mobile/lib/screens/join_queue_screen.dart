@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,11 +10,16 @@ import 'queue_status_screen.dart';
 
 enum _ConditionAnswer { routine, urgent }
 
-const _severeSymptoms = [
-  'Severe pain',
-  'Difficulty breathing',
-  'High fever',
-];
+/// Stable identity for each symptom, independent of its translated label
+/// (which changes with the active language).
+enum _Symptom {
+  severePain('joinQueue.symptomSeverePain'),
+  difficultyBreathing('joinQueue.symptomDifficultyBreathing'),
+  highFever('joinQueue.symptomHighFever');
+
+  final String translationKey;
+  const _Symptom(this.translationKey);
+}
 
 class JoinQueueScreen extends ConsumerStatefulWidget {
   final Clinic clinic;
@@ -30,7 +36,7 @@ class _JoinQueueScreenState extends ConsumerState<JoinQueueScreen> {
   late final TextEditingController _phoneController;
 
   _ConditionAnswer _condition = _ConditionAnswer.routine;
-  final Set<String> _selectedSymptoms = {};
+  final Set<_Symptom> _selectedSymptoms = {};
 
   bool _submitting = false;
   String? _errorMessage;
@@ -87,9 +93,10 @@ class _JoinQueueScreenState extends ConsumerState<JoinQueueScreen> {
         ),
       );
     } on ApiException catch (e) {
-      setState(() => _errorMessage = 'Could not join the queue (${e.statusCode}). Please try again.');
+      setState(() => _errorMessage =
+          'joinQueue.joinErrorWithStatus'.tr(namedArgs: {'status': '${e.statusCode}'}));
     } catch (_) {
-      setState(() => _errorMessage = 'Could not reach the server. Please check your connection.');
+      setState(() => _errorMessage = 'joinQueue.connectionError'.tr());
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -111,43 +118,46 @@ class _JoinQueueScreenState extends ConsumerState<JoinQueueScreen> {
                 style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 20),
-              const Text('Your details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Text('joinQueue.yourDetails'.tr(),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 10),
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Full name',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: 'joinQueue.fullName'.tr(),
+                  border: const OutlineInputBorder(),
                 ),
                 validator: (value) =>
-                    (value == null || value.trim().isEmpty) ? 'Please enter your name' : null,
+                    (value == null || value.trim().isEmpty) ? 'joinQueue.fullNameRequired'.tr() : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Phone number',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: 'joinQueue.phone'.tr(),
+                  border: const OutlineInputBorder(),
                 ),
                 validator: (value) =>
-                    (value == null || value.trim().isEmpty) ? 'Please enter your phone number' : null,
+                    (value == null || value.trim().isEmpty) ? 'joinQueue.phoneRequired'.tr() : null,
               ),
               const SizedBox(height: 28),
-              const Text('Quick triage', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Text('joinQueue.quickTriage'.tr(),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 4),
               Text(
-                'This helps the clinic prioritize urgent cases.',
+                'joinQueue.triageHelp'.tr(),
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
               ),
               const SizedBox(height: 12),
-              const Text('1. How would you describe your condition?', style: TextStyle(fontWeight: FontWeight.w600)),
+              Text('joinQueue.conditionQuestion'.tr(),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
                     child: _ConditionChoiceCard(
-                      label: 'Routine',
+                      label: 'joinQueue.routine'.tr(),
                       icon: Icons.event_available,
                       selected: _condition == _ConditionAnswer.routine,
                       onTap: () => setState(() => _condition = _ConditionAnswer.routine),
@@ -156,7 +166,7 @@ class _JoinQueueScreenState extends ConsumerState<JoinQueueScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _ConditionChoiceCard(
-                      label: 'Urgent',
+                      label: 'joinQueue.urgent'.tr(),
                       icon: Icons.warning_amber_rounded,
                       selected: _condition == _ConditionAnswer.urgent,
                       onTap: () => setState(() => _condition = _ConditionAnswer.urgent),
@@ -165,18 +175,18 @@ class _JoinQueueScreenState extends ConsumerState<JoinQueueScreen> {
                 ],
               ),
               const SizedBox(height: 20),
-              const Text(
-                '2. Are you experiencing any of these symptoms?',
-                style: TextStyle(fontWeight: FontWeight.w600),
+              Text(
+                'joinQueue.symptomsQuestion'.tr(),
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 4),
               Wrap(
                 spacing: 8,
                 runSpacing: 4,
-                children: _severeSymptoms.map((symptom) {
+                children: _Symptom.values.map((symptom) {
                   final selected = _selectedSymptoms.contains(symptom);
                   return FilterChip(
-                    label: Text(symptom),
+                    label: Text(symptom.translationKey.tr()),
                     selected: selected,
                     onSelected: (value) => setState(() {
                       if (value) {
@@ -203,7 +213,7 @@ class _JoinQueueScreenState extends ConsumerState<JoinQueueScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          "You'll be flagged as urgent and prioritized in the queue.",
+                          'joinQueue.urgentWarning'.tr(),
                           style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w600),
                         ),
                       ),
@@ -227,7 +237,7 @@ class _JoinQueueScreenState extends ConsumerState<JoinQueueScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
                       : const Icon(Icons.confirmation_number_outlined),
-                  label: Text(_submitting ? 'Joining…' : 'Join Queue'),
+                  label: Text(_submitting ? 'joinQueue.joining'.tr() : 'joinQueue.joinQueue'.tr()),
                   style: FilledButton.styleFrom(backgroundColor: Colors.teal.shade700),
                 ),
               ),

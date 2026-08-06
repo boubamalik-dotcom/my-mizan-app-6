@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { LogOut, PhoneCall, RefreshCw, Users } from 'lucide-react'
 import type { Clinic } from '../types'
 import { useClinicQueue } from '../hooks/useClinicQueue'
 import { callNextPatient } from '../api'
 import QueueEntryCard from './QueueEntryCard'
 import ConnectionBadge from './ConnectionBadge'
+import LanguageToggle from './LanguageToggle'
 
 interface QueueDashboardProps {
   clinic: Clinic
@@ -12,6 +14,7 @@ interface QueueDashboardProps {
 }
 
 export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboardProps) {
+  const { t } = useTranslation()
   const { queue, loading, error, status, refresh } = useClinicQueue(clinic.id)
   const [callingNext, setCallingNext] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -28,7 +31,7 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
       // connected client in sync too.
       await callNextPatient(clinic.id)
     } catch {
-      setActionError('Failed to call the next patient. Please try again.')
+      setActionError(t('dashboard.callNextError'))
     } finally {
       setCallingNext(false)
     }
@@ -43,13 +46,14 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
             <p className="text-sm text-slate-500">{clinic.specialty}</p>
           </div>
           <div className="flex items-center gap-3">
+            <LanguageToggle />
             <ConnectionBadge status={status} />
             <button
               type="button"
               onClick={onSwitchClinic}
               className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100"
             >
-              <LogOut size={14} /> Switch
+              <LogOut size={14} /> {t('dashboard.switch')}
             </button>
           </div>
         </div>
@@ -58,7 +62,7 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
       <main className="mx-auto max-w-4xl px-4 py-8">
         <div className="mb-8 grid grid-cols-2 gap-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
-            <p className="text-sm text-slate-500">Currently serving</p>
+            <p className="text-sm text-slate-500">{t('dashboard.currentlyServing')}</p>
             <p className="mt-1 text-3xl font-bold text-emerald-600">
               {currentlyServing ? `#${currentlyServing.queue_number}` : '—'}
             </p>
@@ -68,7 +72,7 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <p className="flex items-center gap-1 text-sm text-slate-500">
-              <Users size={14} /> Waiting
+              <Users size={14} /> {t('dashboard.waiting')}
             </p>
             <p className="mt-1 text-3xl font-bold text-slate-900">{waitingCount}</p>
           </div>
@@ -81,7 +85,7 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
           className="mb-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-6 py-5 text-lg font-bold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
         >
           <PhoneCall size={22} />
-          {callingNext ? 'Calling…' : 'Call Next Patient'}
+          {callingNext ? t('dashboard.calling') : t('dashboard.callNext')}
         </button>
 
         {(error || actionError) && (
@@ -92,16 +96,16 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
               onClick={refresh}
               className="flex shrink-0 items-center gap-1 font-medium hover:underline"
             >
-              <RefreshCw size={14} /> Retry
+              <RefreshCw size={14} /> {t('dashboard.retry')}
             </button>
           </div>
         )}
 
         <div className="space-y-3">
           {loading && queue.length === 0 ? (
-            <p className="py-8 text-center text-slate-400">Loading queue…</p>
+            <p className="py-8 text-center text-slate-400">{t('dashboard.loadingQueue')}</p>
           ) : queue.length === 0 ? (
-            <p className="py-8 text-center text-slate-400">No patients in the queue right now.</p>
+            <p className="py-8 text-center text-slate-400">{t('dashboard.noPatients')}</p>
           ) : (
             queue.map((entry) => <QueueEntryCard key={entry.id} entry={entry} />)
           )}

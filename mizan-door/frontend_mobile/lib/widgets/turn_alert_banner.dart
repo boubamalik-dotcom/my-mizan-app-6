@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 /// In-app "your turn is coming up" / "it's your turn" alert.
@@ -26,8 +27,8 @@ class TurnAlertBanner extends StatelessWidget {
   factory TurnAlertBanner.nearTurn(int patientsAhead) {
     return TurnAlertBanner(
       message: patientsAhead <= 0
-          ? "You're next! Please head to the clinic now."
-          : 'Almost there — only $patientsAhead patient${patientsAhead == 1 ? '' : 's'} ahead of you.',
+          ? 'queueStatus.nearTurnReady'.tr()
+          : 'queueStatus.nearTurnCount'.tr(namedArgs: {'count': '$patientsAhead'}),
       icon: Icons.notifications_active,
       color: Colors.orange.shade800,
     );
@@ -35,7 +36,7 @@ class TurnAlertBanner extends StatelessWidget {
 
   factory TurnAlertBanner.yourTurn() {
     return TurnAlertBanner(
-      message: "It's your turn now — please proceed to the clinic desk.",
+      message: 'queueStatus.yourTurn'.tr(),
       icon: Icons.check_circle,
       color: Colors.green.shade800,
     );

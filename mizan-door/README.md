@@ -33,3 +33,12 @@ subfolder here.
 All four MVP steps are implemented. See `backend/README.md`,
 `frontend-web/README.md`, and `frontend_mobile/README.md` for setup and
 implementation details on each piece.
+
+## Internationalization
+
+Both frontends support **French** (default) and **Arabic** (with automatic
+right-to-left layout), switchable via an in-app language toggle:
+`frontend-web` uses `i18next`/`react-i18next` with a `dir`-attribute sync on
+`<html>`; `frontend_mobile` uses `easy_localization`, relying on Flutter's
+built-in RTL handling for `Locale('ar')`. See the "Internationalization"
+section in each app's README for details.

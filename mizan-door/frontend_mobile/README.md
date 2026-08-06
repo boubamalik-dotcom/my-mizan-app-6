@@ -14,6 +14,7 @@ plan.
   persist the patient's identity and in-progress queue visit locally, so the
   app can resume tracking after being closed and reopened, and a returning
   patient doesn't have to re-register
+- [easy_localization](https://pub.dev/packages/easy_localization) for French/Arabic translations and RTL support
 
 ## Setup
 
@@ -60,25 +61,30 @@ production.
 ## Folder structure
 
 ```
-frontend_mobile/lib/
-├── main.dart                        # Riverpod ProviderScope, MaterialApp, session-based routing
-├── config/
-│   └── constants.dart                # apiBaseUrl / wsBaseUrl / nearTurnThreshold
-├── models/
-│   ├── clinic.dart, patient.dart, queue_entry.dart   # Mirror the backend's schemas
-├── services/
-│   └── api_service.dart              # http calls: listClinics, registerPatient, joinQueue, ...
-├── providers/
-│   ├── api_providers.dart            # apiServiceProvider, clinicsProvider
-│   ├── patient_session_provider.dart # Persisted identity + active-queue tracking (shared_preferences)
-│   └── queue_controller.dart         # REST fetch + WS /ws/clinics/{clinicId} sync, auto-reconnect
-├── screens/
-│   ├── clinic_select_screen.dart     # Pick a clinic
-│   ├── join_queue_screen.dart        # Register/reuse patient + 2-question triage + join
-│   └── queue_status_screen.dart      # Real-time "Your number" / "Currently serving" tracking
-└── widgets/
-    ├── connection_status_chip.dart   # "Live" / "Reconnecting…" indicator
-    └── turn_alert_banner.dart        # In-app "your turn is near" / "it's your turn" alert
+frontend_mobile/
+├── assets/translations/
+│   ├── fr.json                        # French translations (default language)
+│   └── ar.json                        # Arabic translations
+└── lib/
+    ├── main.dart                        # EasyLocalization + Riverpod ProviderScope, MaterialApp, session-based routing
+    ├── config/
+    │   └── constants.dart                # apiBaseUrl / wsBaseUrl / nearTurnThreshold / supportedLocales
+    ├── models/
+    │   ├── clinic.dart, patient.dart, queue_entry.dart   # Mirror the backend's schemas
+    ├── services/
+    │   └── api_service.dart              # http calls: listClinics, registerPatient, joinQueue, ...
+    ├── providers/
+    │   ├── api_providers.dart            # apiServiceProvider, clinicsProvider
+    │   ├── patient_session_provider.dart # Persisted identity + active-queue tracking (shared_preferences)
+    │   └── queue_controller.dart         # REST fetch + WS /ws/clinics/{clinicId} sync, auto-reconnect
+    ├── screens/
+    │   ├── clinic_select_screen.dart     # Pick a clinic (the "home" screen, with the language toggle)
+    │   ├── join_queue_screen.dart        # Register/reuse patient + 2-question triage + join
+    │   └── queue_status_screen.dart      # Real-time "Your number" / "Currently serving" tracking
+    └── widgets/
+        ├── connection_status_chip.dart   # "Live" / "Reconnecting…" indicator
+        ├── turn_alert_banner.dart        # In-app "your turn is near" / "it's your turn" alert
+        └── language_toggle.dart          # FR/AR switcher
 ```
 
 ## How it works
@@ -120,6 +126,31 @@ frontend_mobile/lib/
    and testably, on every Flutter target including the web build used to
    verify this app) was used instead. Swapping in real push notifications
    later only means adding a call alongside where this banner is shown.
+
+## Internationalization (French / Arabic) & RTL
+
+- `main.dart` wraps the app in `EasyLocalization` (`supportedLocales:
+  [Locale('fr'), Locale('ar')]`, `path: 'assets/translations'`,
+  `fallbackLocale`/`startLocale: Locale('fr')`), and `MaterialApp` reads
+  `locale`/`localizationsDelegates`/`supportedLocales` from `context` so the
+  whole app rebuilds when the locale changes.
+- All UI copy uses easy_localization's `'namespace.key'.tr()` extension (see
+  `assets/translations/fr.json` / `ar.json` for the full key list). Clinic
+  and patient data (names, specialties, phone numbers) come from the backend
+  and are intentionally **not** translated.
+- `LanguageToggle` (FR/AR buttons) is in the clinic-selection ("home")
+  screen's app bar.
+- **RTL is automatic**: `ar` is one of Flutter's built-in RTL languages, so
+  once `MaterialApp.locale` is `Locale('ar')`, `Directionality` flips for the
+  whole widget tree — text alignment, `Row` order, `Scaffold`/`AppBar`
+  layout, etc. all mirror with no extra code. The one exception is
+  direction-*implying* icons (e.g. a "next" chevron), which Flutter does not
+  auto-flip; `clinic_select_screen.dart` swaps `Icons.chevron_right` for
+  `Icons.chevron_left` under RTL as an example of handling that case.
+- `easy_localization` re-exports `package:intl`, which has its own
+  `TextDirection` class that collides with Flutter's — see the `hide
+  TextDirection` import note in `clinic_select_screen.dart` if you run into
+  an `undefined_getter` error on `TextDirection.rtl`/`.ltr` elsewhere.
 
 ## Testing without a device or emulator
 

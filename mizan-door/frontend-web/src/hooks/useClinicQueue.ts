@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { WS_BASE_URL } from '../config'
 import { getClinicQueue } from '../api'
 import type { QueueEntry, QueueUpdatedMessage } from '../types'
@@ -13,6 +14,7 @@ const RECONNECT_DELAY_MS = 2000
  * WebSocket if the connection drops.
  */
 export function useClinicQueue(clinicId: string | null) {
+  const { t } = useTranslation()
   const [queue, setQueue] = useState<QueueEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,11 +31,11 @@ export function useClinicQueue(clinicId: string | null) {
       setQueue(data)
       setError(null)
     } catch {
-      setError('Could not load the queue from the server.')
+      setError(t('dashboard.loadError'))
     } finally {
       setLoading(false)
     }
-  }, [clinicId])
+  }, [clinicId, t])
 
   useEffect(() => {
     if (!clinicId) return

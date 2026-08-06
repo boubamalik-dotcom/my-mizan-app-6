@@ -1,7 +1,9 @@
+import { useTranslation } from 'react-i18next'
 import { Wifi, WifiOff } from 'lucide-react'
 import type { ConnectionStatus } from '../hooks/useClinicQueue'
 
 export default function ConnectionBadge({ status }: { status: ConnectionStatus }) {
+  const { t } = useTranslation()
   const isOpen = status === 'open'
 
   return (
@@ -11,7 +13,7 @@ export default function ConnectionBadge({ status }: { status: ConnectionStatus }
       }`}
     >
       {isOpen ? <Wifi size={12} /> : <WifiOff size={12} />}
-      {isOpen ? 'Live' : 'Reconnecting…'}
+      {isOpen ? t('connection.live') : t('connection.reconnecting')}
     </span>
   )
 }

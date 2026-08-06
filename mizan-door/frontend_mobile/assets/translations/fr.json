@@ -1,0 +1,58 @@
+{
+  "app": {
+    "name": "Mizan Door"
+  },
+  "clinicSelect": {
+    "title": "Sélectionnez une clinique pour rejoindre sa file",
+    "noClinics": "Aucune clinique n'est encore enregistrée.\nDemandez à votre clinique de configurer Mizan Door.",
+    "connectionError": "Impossible de joindre le serveur Mizan Door.\nVérifiez que le backend est démarré.",
+    "retry": "Réessayer"
+  },
+  "joinQueue": {
+    "yourDetails": "Vos informations",
+    "fullName": "Nom complet",
+    "fullNameRequired": "Veuillez entrer votre nom",
+    "phone": "Numéro de téléphone",
+    "phoneRequired": "Veuillez entrer votre numéro de téléphone",
+    "quickTriage": "Triage rapide",
+    "triageHelp": "Cela aide la clinique à prioriser les cas urgents.",
+    "conditionQuestion": "1. Comment décririez-vous votre état ?",
+    "routine": "Routine",
+    "urgent": "Urgent",
+    "symptomsQuestion": "2. Ressentez-vous l'un de ces symptômes ?",
+    "symptomSeverePain": "Douleur intense",
+    "symptomDifficultyBreathing": "Difficulté à respirer",
+    "symptomHighFever": "Forte fièvre",
+    "urgentWarning": "Vous serez signalé comme urgent et prioritaire dans la file.",
+    "joinErrorWithStatus": "Impossible de rejoindre la file ({status}). Veuillez réessayer.",
+    "connectionError": "Impossible de joindre le serveur. Vérifiez votre connexion.",
+    "joining": "Connexion…",
+    "joinQueue": "Rejoindre la file"
+  },
+  "queueStatus": {
+    "title": "Votre statut dans la file",
+    "leave": "Quitter",
+    "yourNumber": "Votre numéro",
+    "currentlyServing": "Patient actuel",
+    "nextInLine": "Vous êtes le prochain.",
+    "patientsAheadCount": "{count} patient(s) devant vous.",
+    "visitComplete": "Votre visite est terminée. Merci d'avoir utilisé Mizan Door !",
+    "joinAnother": "Rejoindre une autre file",
+    "nearTurnReady": "Vous y êtes ! Rendez-vous à la clinique maintenant.",
+    "nearTurnCount": "Presque prêt — plus que {count} patient(s) devant vous.",
+    "yourTurn": "C'est votre tour — veuillez vous présenter à l'accueil de la clinique."
+  },
+  "status": {
+    "waiting": "En attente",
+    "inConsultation": "En consultation",
+    "completed": "Terminé",
+    "cancelled": "Annulé"
+  },
+  "connection": {
+    "live": "En direct",
+    "reconnecting": "Reconnexion…"
+  },
+  "language": {
+    "toggle": "Langue"
+  }
+}

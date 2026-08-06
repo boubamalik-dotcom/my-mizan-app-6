@@ -1,0 +1,47 @@
+{
+  "app": {
+    "name": "Mizan Door",
+    "tagline": "لوحة تحكم موظف الاستقبال"
+  },
+  "clinicSelect": {
+    "selectClinic": "اختر عيادتك",
+    "registerNew": "تسجيل عيادة جديدة",
+    "noClinics": "لا توجد عيادات مسجلة بعد.",
+    "clinicNameLabel": "اسم العيادة",
+    "clinicNamePlaceholder": "عيادة الأمل",
+    "specialtyLabel": "التخصص",
+    "specialtyPlaceholder": "طب عام",
+    "cancel": "إلغاء",
+    "createClinic": "إنشاء العيادة",
+    "connectionError": "تعذر الوصول إلى واجهة برمجة تطبيقات ميزان الباب. هل الخادم يعمل؟",
+    "createError": "فشل إنشاء العيادة. يرجى المحاولة مرة أخرى."
+  },
+  "dashboard": {
+    "currentlyServing": "الحالة الجارية",
+    "waiting": "في الانتظار",
+    "callNext": "استدعاء التالي",
+    "calling": "جارٍ الاستدعاء…",
+    "noPatients": "لا يوجد مرضى في الطابور حاليًا.",
+    "loadingQueue": "جارٍ تحميل الطابور…",
+    "loadError": "تعذر تحميل الطابور من الخادم.",
+    "callNextError": "فشل استدعاء المريض التالي. يرجى المحاولة مرة أخرى.",
+    "retry": "إعادة المحاولة",
+    "switch": "تبديل"
+  },
+  "connection": {
+    "live": "مباشر",
+    "reconnecting": "إعادة الاتصال…"
+  },
+  "status": {
+    "waiting": "في الانتظار",
+    "inConsultation": "في الاستشارة"
+  },
+  "queueEntry": {
+    "urgent": "عاجل"
+  },
+  "language": {
+    "toggle": "اللغة",
+    "fr": "Français",
+    "ar": "العربية"
+  }
+}

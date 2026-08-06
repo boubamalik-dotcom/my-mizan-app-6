@@ -1,12 +1,25 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'config/constants.dart';
 import 'providers/patient_session_provider.dart';
 import 'screens/clinic_select_screen.dart';
 import 'screens/queue_status_screen.dart';
 
-void main() {
-  runApp(const ProviderScope(child: MizanDoorApp()));
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await EasyLocalization.ensureInitialized();
+
+  runApp(
+    EasyLocalization(
+      supportedLocales: supportedLocales,
+      path: 'assets/translations',
+      fallbackLocale: fallbackLocale,
+      startLocale: fallbackLocale,
+      child: const ProviderScope(child: MizanDoorApp()),
+    ),
+  );
 }
 
 class MizanDoorApp extends StatelessWidget {
@@ -17,6 +30,9 @@ class MizanDoorApp extends StatelessWidget {
     return MaterialApp(
       title: 'Mizan Door',
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: context.localizationDelegates,
+      supportedLocales: context.supportedLocales,
+      locale: context.locale,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
         useMaterial3: true,
