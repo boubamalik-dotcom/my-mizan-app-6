@@ -1,19 +1,22 @@
+"""FastAPI application entrypoint for the Mizan Door backend."""
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import crud, schemas
 from app.core.config import settings
-from app.core.database import init_db
-from app.routers import clinics, patients, queue
+from app.core.database import Base, engine, get_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Convenient for local development. In staging/production, schema changes
-    # should be applied via Alembic migrations instead (see alembic/).
-    if settings.debug:
-        await init_db()
+    # Creates tables directly from the ORM models on startup. Handy for local
+    # development; use Alembic migrations (see alembic/) for staging/production.
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
 
 
@@ -32,10 +35,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(clinics.router)
-app.include_router(patients.router)
-app.include_router(queue.router)
-
 
 @app.get("/", tags=["health"])
 async def root() -> dict[str, str]:
@@ -45,3 +44,57 @@ async def root() -> dict[str, str]:
 @app.get("/health", tags=["health"])
 async def health() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.post("/clinics", response_model=schemas.ClinicResponse, status_code=status.HTTP_201_CREATED, tags=["clinics"])
+async def create_clinic(payload: schemas.ClinicCreate, db: AsyncSession = Depends(get_db)) -> schemas.ClinicResponse:
+    clinic = await crud.create_clinic(db, payload)
+    return schemas.ClinicResponse.model_validate(clinic)
+
+
+@app.post("/patients", response_model=schemas.PatientResponse, status_code=status.HTTP_201_CREATED, tags=["patients"])
+async def create_patient(
+    payload: schemas.PatientCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.PatientResponse:
+    existing = await crud.get_patient_by_phone(db, payload.phone)
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Patient with this phone already exists"
+        )
+    patient = await crud.create_patient(db, payload)
+    return schemas.PatientResponse.model_validate(patient)
+
+
+@app.post(
+    "/clinics/{clinic_id}/queue",
+    response_model=schemas.QueueEntryResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["queue"],
+)
+async def join_clinic_queue(
+    clinic_id: uuid.UUID, payload: schemas.QueueEntryCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.QueueEntryResponse:
+    clinic = await crud.get_clinic(db, clinic_id)
+    if clinic is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+
+    patient = await crud.get_patient(db, payload.patient_id)
+    if patient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+
+    entry = await crud.add_patient_to_queue(db, clinic_id, payload.patient_id, payload.is_urgent)
+    return schemas.QueueEntryResponse.model_validate(entry)
+
+
+@app.get(
+    "/clinics/{clinic_id}/queue",
+    response_model=list[schemas.QueueEntryResponse],
+    tags=["queue"],
+)
+async def get_clinic_queue(clinic_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> list[schemas.QueueEntryResponse]:
+    clinic = await crud.get_clinic(db, clinic_id)
+    if clinic is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+
+    entries = await crud.get_clinic_queue(db, clinic_id)
+    return [schemas.QueueEntryResponse.model_validate(entry) for entry in entries]

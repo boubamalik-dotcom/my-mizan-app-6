@@ -11,26 +11,16 @@ endpoints. WebSockets and Redis pub/sub for real-time updates land in Step 2.
 ```
 backend/
 ├── app/
-│   ├── main.py                # FastAPI app, CORS, router registration
+│   ├── main.py                # FastAPI app, lifespan (create_all), CORS, REST routes
+│   ├── schemas.py              # Pydantic request/response models
+│   ├── crud.py                 # Async SQLAlchemy CRUD functions
 │   ├── core/
 │   │   ├── config.py          # Settings loaded from environment (.env)
 │   │   └── database.py        # Async SQLAlchemy engine/session, Base, get_db()
-│   ├── models/                # SQLAlchemy ORM models
-│   │   ├── clinic.py
-│   │   ├── patient.py
-│   │   └── queue_entry.py
-│   ├── schemas/                # Pydantic request/response schemas
-│   │   ├── clinic.py
-│   │   ├── patient.py
-│   │   └── queue_entry.py
-│   ├── crud/                   # Database access functions
-│   │   ├── clinic.py
-│   │   ├── patient.py
-│   │   └── queue_entry.py
-│   └── routers/                 # FastAPI routers (REST endpoints)
-│       ├── clinics.py
-│       ├── patients.py
-│       └── queue.py
+│   └── models/                 # SQLAlchemy ORM models
+│       ├── clinic.py
+│       ├── patient.py
+│       └── queue_entry.py
 ├── alembic/                     # Database migrations
 │   ├── env.py
 │   └── versions/
@@ -95,37 +85,16 @@ at `http://localhost:8000/docs`.
 
 ## REST API
 
-### Clinics — `/api/v1/clinics`
-
 | Method | Path | Description |
 |---|---|---|
-| POST | `/` | Create a clinic |
-| GET | `/` | List clinics |
-| GET | `/{clinic_id}` | Get a clinic |
-| PATCH | `/{clinic_id}` | Update a clinic |
-| DELETE | `/{clinic_id}` | Delete a clinic |
-
-### Patients — `/api/v1/patients`
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/` | Register a patient (phone must be unique) |
-| GET | `/` | List patients |
-| GET | `/{patient_id}` | Get a patient |
-| PATCH | `/{patient_id}` | Update a patient |
-| DELETE | `/{patient_id}` | Delete a patient |
-
-### Queue — `/api/v1/queue`
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/` | Join a clinic's queue (`clinic_id`, `patient_id`, `is_urgent`) — assigns the next ticket number |
-| GET | `/clinic/{clinic_id}` | List a clinic's queue (defaults to today only), urgent first |
-| GET | `/{entry_id}` | Get a queue entry |
-| PATCH | `/{entry_id}` | Update status (`waiting` \| `in_consultation` \| `completed` \| `cancelled`) or urgency |
-| DELETE | `/{entry_id}` | Remove a queue entry |
+| POST | `/clinics` | Create a clinic (`name`, `specialty`) |
+| POST | `/patients` | Register a patient (`name`, `phone` — must be unique, `409` on duplicate) |
+| POST | `/clinics/{clinic_id}/queue` | Add a patient to the clinic's queue (`patient_id`, `is_urgent`) — assigns the next ticket number, scoped per clinic and reset daily |
+| GET | `/clinics/{clinic_id}/queue` | Get the clinic's current active queue (`waiting` / `in_consultation` entries), urgent first, then by ticket number |
 
 Health checks: `GET /` and `GET /health`.
+
+Both `clinic_id` and `patient_id` are validated to exist; unknown ids return `404`.
 
 ## Migrations
 
@@ -140,5 +109,5 @@ alembic upgrade head
 
 - Redis connection and pub/sub.
 - `ConnectionManager` for WebSocket clients.
-- `POST /api/v1/clinics/{clinic_id}/next` to call the next patient (updates DB + publishes to Redis).
+- `POST /clinics/{clinic_id}/next` to call the next patient (updates DB + publishes to Redis).
 - `WS /ws/clinics/{clinic_id}` for the dashboard and patient app to receive real-time updates.
