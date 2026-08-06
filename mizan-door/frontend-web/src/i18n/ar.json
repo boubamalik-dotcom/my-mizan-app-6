@@ -1,0 +1,52 @@
+{
+  "app": {
+    "name": "Mizan Door",
+    "tagline": "لوحة تحكم موظف الاستقبال"
+  },
+  "auth": {
+    "loginTab": "تسجيل الدخول",
+    "registerTab": "عيادة جديدة",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "fullNameLabel": "اسمك",
+    "fullNamePlaceholder": "أمينة بن علي",
+    "clinicNameLabel": "اسم العيادة",
+    "clinicNamePlaceholder": "عيادة الأمل",
+    "specialtyLabel": "التخصص",
+    "specialtyPlaceholder": "طب عام",
+    "loginButton": "تسجيل الدخول",
+    "registerButton": "إنشاء الحساب",
+    "loginError": "البريد الإلكتروني أو كلمة المرور غير صحيحة.",
+    "emailTakenError": "هذا البريد الإلكتروني مسجل مسبقًا.",
+    "registerError": "تعذر إنشاء الحساب. يرجى المحاولة مرة أخرى.",
+    "networkError": "تعذر الوصول إلى خادم ميزان الباب. هل الخادم يعمل؟"
+  },
+  "dashboard": {
+    "currentlyServing": "الحالة الجارية",
+    "waiting": "في الانتظار",
+    "callNext": "استدعاء التالي",
+    "calling": "جارٍ الاستدعاء…",
+    "noPatients": "لا يوجد مرضى في الطابور حاليًا.",
+    "loadingQueue": "جارٍ تحميل الطابور…",
+    "loadError": "تعذر تحميل الطابور من الخادم.",
+    "callNextError": "فشل استدعاء المريض التالي. يرجى المحاولة مرة أخرى.",
+    "retry": "إعادة المحاولة",
+    "logout": "تسجيل الخروج"
+  },
+  "connection": {
+    "live": "مباشر",
+    "reconnecting": "إعادة الاتصال…"
+  },
+  "status": {
+    "waiting": "في الانتظار",
+    "inConsultation": "في الاستشارة"
+  },
+  "queueEntry": {
+    "urgent": "عاجل"
+  },
+  "language": {
+    "toggle": "اللغة",
+    "fr": "Français",
+    "ar": "العربية"
+  }
+}

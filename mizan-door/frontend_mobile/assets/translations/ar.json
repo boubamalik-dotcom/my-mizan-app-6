@@ -1,0 +1,58 @@
+{
+  "app": {
+    "name": "Mizan Door"
+  },
+  "clinicSelect": {
+    "title": "اختر عيادة للانضمام إلى طابورها",
+    "noClinics": "لا توجد عيادات مسجلة بعد.\nاطلب من عيادتك إعداد ميزان الباب أولاً.",
+    "connectionError": "تعذر الوصول إلى خادم ميزان الباب.\nتحقق من تشغيل الخادم.",
+    "retry": "إعادة المحاولة"
+  },
+  "joinQueue": {
+    "yourDetails": "بياناتك",
+    "fullName": "الاسم الكامل",
+    "fullNameRequired": "يرجى إدخال اسمك",
+    "phone": "رقم الهاتف",
+    "phoneRequired": "يرجى إدخال رقم هاتفك",
+    "quickTriage": "الفرز السريع",
+    "triageHelp": "يساعد هذا العيادة على إعطاء الأولوية للحالات العاجلة.",
+    "conditionQuestion": "١. كيف تصف حالتك؟",
+    "routine": "روتينية",
+    "urgent": "عاجلة",
+    "symptomsQuestion": "٢. هل تعاني من أي من هذه الأعراض؟",
+    "symptomSeverePain": "ألم شديد",
+    "symptomDifficultyBreathing": "صعوبة في التنفس",
+    "symptomHighFever": "حمى شديدة",
+    "urgentWarning": "سيتم تصنيفك كحالة عاجلة وستحظى بالأولوية في الطابور.",
+    "joinErrorWithStatus": "تعذر الانضمام إلى الطابور ({status}). يرجى المحاولة مرة أخرى.",
+    "connectionError": "تعذر الوصول إلى الخادم. يرجى التحقق من اتصالك.",
+    "joining": "جارٍ الانضمام…",
+    "joinQueue": "انضم للطابور"
+  },
+  "queueStatus": {
+    "title": "حالتك في الطابور",
+    "leave": "مغادرة",
+    "yourNumber": "رقمك",
+    "currentlyServing": "الرقم الحالي",
+    "nextInLine": "أنت التالي في الطابور.",
+    "patientsAheadCount": "{count} مريض أمامك.",
+    "visitComplete": "اكتملت زيارتك. شكرًا لاستخدامك ميزان الباب!",
+    "joinAnother": "الانضمام إلى طابور آخر",
+    "nearTurnReady": "لقد اقترب دورك! توجه إلى العيادة الآن.",
+    "nearTurnCount": "اقترب دورك — تبقى {count} مريض أمامك فقط.",
+    "yourTurn": "لقد حان دورك — يرجى التوجه إلى مكتب الاستقبال."
+  },
+  "status": {
+    "waiting": "في الانتظار",
+    "inConsultation": "في الاستشارة",
+    "completed": "مكتمل",
+    "cancelled": "ملغى"
+  },
+  "connection": {
+    "live": "مباشر",
+    "reconnecting": "إعادة الاتصال…"
+  },
+  "language": {
+    "toggle": "اللغة"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "app": {
+    "name": "Mizan Door",
+    "tagline": "Tableau de bord de la réception"
+  },
+  "auth": {
+    "loginTab": "Connexion",
+    "registerTab": "Nouvelle clinique",
+    "email": "E-mail",
+    "password": "Mot de passe",
+    "fullNameLabel": "Votre nom",
+    "fullNamePlaceholder": "Amina Benali",
+    "clinicNameLabel": "Nom de la clinique",
+    "clinicNamePlaceholder": "Clinique Al Amal",
+    "specialtyLabel": "Spécialité",
+    "specialtyPlaceholder": "Médecine générale",
+    "loginButton": "Se connecter",
+    "registerButton": "Créer le compte",
+    "loginError": "E-mail ou mot de passe invalide.",
+    "emailTakenError": "Cet e-mail est déjà enregistré.",
+    "registerError": "Impossible de créer le compte. Veuillez réessayer.",
+    "networkError": "Impossible de joindre le serveur Mizan Door. Le backend est-il démarré ?"
+  },
+  "dashboard": {
+    "currentlyServing": "Patient en cours",
+    "waiting": "En attente",
+    "callNext": "Appeler le suivant",
+    "calling": "Appel en cours…",
+    "noPatients": "Aucun patient dans la file pour le moment.",
+    "loadingQueue": "Chargement de la file…",
+    "loadError": "Impossible de charger la file depuis le serveur.",
+    "callNextError": "Échec de l'appel du patient suivant. Veuillez réessayer.",
+    "retry": "Réessayer",
+    "logout": "Déconnexion"
+  },
+  "connection": {
+    "live": "En direct",
+    "reconnecting": "Reconnexion…"
+  },
+  "status": {
+    "waiting": "En attente",
+    "inConsultation": "En consultation"
+  },
+  "queueEntry": {
+    "urgent": "Urgent"
+  },
+  "language": {
+    "toggle": "Langue",
+    "fr": "Français",
+    "ar": "العربية"
+  }
+}
