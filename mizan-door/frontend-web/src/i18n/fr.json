@@ -3,18 +3,23 @@
     "name": "Mizan Door",
     "tagline": "Tableau de bord de la réception"
   },
-  "clinicSelect": {
-    "selectClinic": "Sélectionnez votre clinique",
-    "registerNew": "Enregistrer une nouvelle clinique",
-    "noClinics": "Aucune clinique n'est encore enregistrée.",
+  "auth": {
+    "loginTab": "Connexion",
+    "registerTab": "Nouvelle clinique",
+    "email": "E-mail",
+    "password": "Mot de passe",
+    "fullNameLabel": "Votre nom",
+    "fullNamePlaceholder": "Amina Benali",
     "clinicNameLabel": "Nom de la clinique",
     "clinicNamePlaceholder": "Clinique Al Amal",
     "specialtyLabel": "Spécialité",
     "specialtyPlaceholder": "Médecine générale",
-    "cancel": "Annuler",
-    "createClinic": "Créer la clinique",
-    "connectionError": "Impossible de joindre l'API Mizan Door. Le serveur est-il démarré ?",
-    "createError": "Échec de la création de la clinique. Veuillez réessayer."
+    "loginButton": "Se connecter",
+    "registerButton": "Créer le compte",
+    "loginError": "E-mail ou mot de passe invalide.",
+    "emailTakenError": "Cet e-mail est déjà enregistré.",
+    "registerError": "Impossible de créer le compte. Veuillez réessayer.",
+    "networkError": "Impossible de joindre le serveur Mizan Door. Le backend est-il démarré ?"
   },
   "dashboard": {
     "currentlyServing": "Patient en cours",
@@ -26,7 +31,7 @@
     "loadError": "Impossible de charger la file depuis le serveur.",
     "callNextError": "Échec de l'appel du patient suivant. Veuillez réessayer.",
     "retry": "Réessayer",
-    "switch": "Changer"
+    "logout": "Déconnexion"
   },
   "connection": {
     "live": "En direct",

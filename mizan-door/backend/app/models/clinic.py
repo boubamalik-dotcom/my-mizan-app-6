@@ -10,6 +10,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.queue_entry import QueueEntry
+    from app.models.user import User
 
 
 class Clinic(Base):
@@ -23,3 +24,4 @@ class Clinic(Base):
     queue_entries: Mapped[list["QueueEntry"]] = relationship(
         back_populates="clinic", cascade="all, delete-orphan"
     )
+    users: Mapped[list["User"]] = relationship(back_populates="clinic", cascade="all, delete-orphan")

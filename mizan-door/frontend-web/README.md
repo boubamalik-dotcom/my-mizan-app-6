@@ -1,7 +1,6 @@
-# Mizan Door — Clinic Dashboard (Step 3)
+# Mizan Door — Clinic Dashboard
 
-React + TypeScript + Vite dashboard for clinic receptionists, built for **Step 3**
-of the Mizan Door implementation plan.
+React + TypeScript + Vite dashboard for clinic receptionists.
 
 ## Stack
 
@@ -34,10 +33,10 @@ npm run preview   # preview the production build
 ```
 frontend-web/src/
 ├── main.tsx                    # React entrypoint (imports i18n/i18n.ts)
-├── App.tsx                     # Selected-clinic state (persisted to localStorage)
+├── App.tsx                     # Auth session state (persisted to localStorage), routes to AuthScreen/QueueDashboard
 ├── config.ts                   # API_BASE_URL / WS_BASE_URL
-├── types.ts                    # Clinic / Patient / QueueEntry / WS message types
-├── api.ts                      # axios client + REST calls
+├── types.ts                    # Clinic / Patient / User / AuthSession / QueueEntry / WS message types
+├── api.ts                      # axios client + REST calls + bearer-token header helper
 ├── i18n/
 │   ├── i18n.ts                 # i18next setup, default language (fr), <html dir/lang> sync
 │   ├── fr.json                 # French translations (default language)
@@ -45,28 +44,26 @@ frontend-web/src/
 ├── hooks/
 │   └── useClinicQueue.ts       # REST fetch + WebSocket subscription with auto-reconnect
 └── components/
-    ├── ClinicSelect.tsx        # Pick an existing clinic or register a new one
-    ├── QueueDashboard.tsx      # Header, summary cards, "Call Next Patient", queue list
+    ├── AuthScreen.tsx          # Login / "register a new clinic" screen (real auth, see below)
+    ├── QueueDashboard.tsx      # Header, summary cards, "Call Next Patient", queue list, logout
     ├── QueueEntryCard.tsx      # A single queue entry (ticket #, patient, urgent badge, status)
     ├── ConnectionBadge.tsx     # "Live" / "Reconnecting…" WebSocket status indicator
-    └── LanguageToggle.tsx      # FR/AR switcher (in the dashboard header and clinic-select screen)
+    └── LanguageToggle.tsx      # FR/AR switcher (on the auth screen and the dashboard header)
 ```
 
 ## How it works
 
-1. **Clinic selection** (`ClinicSelect`) acts as a lightweight "login" for the
-   receptionist: it lists existing clinics (`GET /clinics`) to pick from, or
-   lets you register a new one (`POST /clinics`). The backend doesn't yet have
-   user accounts/auth (only clinic/patient/queue models), so this is a
-   simplification — see "Known limitations" below. The chosen clinic is
-   persisted to `localStorage` so it survives a page refresh.
+1. **Authentication** (`AuthScreen`): a real login/registration screen for
+   clinic staff — see "Authentication" below.
 
 2. **Dashboard** (`QueueDashboard`) shows:
    - The clinic's name/specialty and a live WebSocket connection badge.
    - "Currently serving" and "Waiting" summary cards.
-   - A big **Call Next Patient** button (`POST /clinics/{clinic_id}/next`).
+   - A big **Call Next Patient** button (`POST /clinics/{clinic_id}/next`,
+     sent with the staff member's bearer token).
    - The active queue (`GET /clinics/{clinic_id}/queue` on load), with urgent
      patients flagged and sorted first.
+   - A **Déconnexion / تسجيل الخروج (Logout)** button.
 
 3. **Real-time sync** (`useClinicQueue`): after the initial REST fetch, the
    dashboard opens `WS /ws/clinics/{clinic_id}` and listens for
@@ -74,6 +71,32 @@ frontend-web/src/
    replacing its local queue state on every message — no polling or manual
    refresh needed. If the socket drops, it automatically reconnects after a
    short delay and shows "Reconnecting…" in the meantime.
+
+## Authentication
+
+`AuthScreen` replaces the earlier "pick your clinic from a list" placeholder
+with real login/registration against the backend's JWT-based staff auth
+(see `../backend/README.md`'s "Authentication" section):
+
+- **Login tab**: email + password → `POST /auth/login`.
+- **"Nouvelle clinique" (register) tab**: clinic name, specialty, staff name,
+  email, password → `POST /auth/register`, which creates the clinic and this
+  first staff account together.
+- On success, `{ access_token, user, clinic }` is stored in `localStorage`
+  (`mizan-door.auth-session`) and the token is attached as
+  `Authorization: Bearer <token>` on all subsequent API calls
+  (`setAuthToken` in `api.ts`, called from `App.tsx`).
+- On load, if a session is cached, `App.tsx` calls `GET /auth/me` to confirm
+  the token is still valid before trusting it (tokens expire after 12 hours
+  by default) — an expired/invalid token clears the cached session and shows
+  the login screen again. `QueueDashboard` does the same if a `401` comes
+  back from `POST /clinics/{clinic_id}/next` mid-session.
+- **Logout** clears the stored session and the `Authorization` header.
+
+Patients never log in — `GET /clinics`, `POST /patients`,
+`POST /clinics/{clinic_id}/queue`, and `GET /clinics/{clinic_id}/queue`
+remain public, since the mobile patient app relies on them without any staff
+credentials.
 
 ## Internationalization (French / Arabic) & RTL
 
@@ -86,8 +109,8 @@ frontend-web/src/
   (see `src/i18n/fr.json` / `ar.json` for the full key list). Clinic/patient
   data (names, specialties, phone numbers) is real user data from the
   backend and is intentionally **not** translated.
-- `LanguageToggle` (FR/AR buttons) appears in the clinic-selection screen and
-  in the dashboard header.
+- `LanguageToggle` (FR/AR buttons) appears on the auth screen and in the
+  dashboard header.
 - Tailwind v3.3+'s logical-property utilities (`text-start`/`text-end`,
   `ms-*`/`me-*`, `ps-*`/`pe-*`) are used instead of physical ones
   (`text-left`/`right`, `ml-*`/`mr-*`, `pl-*`/`pr-*`) so spacing/alignment
@@ -95,11 +118,11 @@ frontend-web/src/
   default) already reverse visually under RTL per the CSS spec, with no
   extra classes needed.
 
-## Known limitations (by design, for this step)
+## Known limitations (by design)
 
-- **No real authentication.** The backend doesn't have clinic staff
-  accounts; "selecting your clinic" is used as a stand-in for login. Adding
-  real auth would be a backend change outside this step's scope.
 - **No "add patient to queue" UI here.** Per the project plan, patients join
-  the queue from the Flutter app (Step 4); this dashboard only *manages* an
-  existing queue (view + call next).
+  the queue from the Flutter app; this dashboard only *manages* an existing
+  queue (view + call next).
+- **No token refresh/revocation UI.** A session simply expires after 12
+  hours and the receptionist has to log in again; there's no "remember me"
+  or refresh-token flow (matches the backend's current scope).

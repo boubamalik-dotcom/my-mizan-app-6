@@ -3,18 +3,23 @@
     "name": "Mizan Door",
     "tagline": "لوحة تحكم موظف الاستقبال"
   },
-  "clinicSelect": {
-    "selectClinic": "اختر عيادتك",
-    "registerNew": "تسجيل عيادة جديدة",
-    "noClinics": "لا توجد عيادات مسجلة بعد.",
+  "auth": {
+    "loginTab": "تسجيل الدخول",
+    "registerTab": "عيادة جديدة",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "fullNameLabel": "اسمك",
+    "fullNamePlaceholder": "أمينة بن علي",
     "clinicNameLabel": "اسم العيادة",
     "clinicNamePlaceholder": "عيادة الأمل",
     "specialtyLabel": "التخصص",
     "specialtyPlaceholder": "طب عام",
-    "cancel": "إلغاء",
-    "createClinic": "إنشاء العيادة",
-    "connectionError": "تعذر الوصول إلى واجهة برمجة تطبيقات ميزان الباب. هل الخادم يعمل؟",
-    "createError": "فشل إنشاء العيادة. يرجى المحاولة مرة أخرى."
+    "loginButton": "تسجيل الدخول",
+    "registerButton": "إنشاء الحساب",
+    "loginError": "البريد الإلكتروني أو كلمة المرور غير صحيحة.",
+    "emailTakenError": "هذا البريد الإلكتروني مسجل مسبقًا.",
+    "registerError": "تعذر إنشاء الحساب. يرجى المحاولة مرة أخرى.",
+    "networkError": "تعذر الوصول إلى خادم ميزان الباب. هل الخادم يعمل؟"
   },
   "dashboard": {
     "currentlyServing": "الحالة الجارية",
@@ -26,7 +31,7 @@
     "loadError": "تعذر تحميل الطابور من الخادم.",
     "callNextError": "فشل استدعاء المريض التالي. يرجى المحاولة مرة أخرى.",
     "retry": "إعادة المحاولة",
-    "switch": "تبديل"
+    "logout": "تسجيل الخروج"
   },
   "connection": {
     "live": "مباشر",

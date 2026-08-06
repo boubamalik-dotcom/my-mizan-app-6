@@ -1,41 +1,57 @@
 import { useEffect, useState } from 'react'
-import ClinicSelect from './components/ClinicSelect'
+import AuthScreen from './components/AuthScreen'
 import QueueDashboard from './components/QueueDashboard'
-import type { Clinic } from './types'
+import { fetchMe, setAuthToken } from './api'
+import type { AuthSession } from './types'
 
-const STORAGE_KEY = 'mizan-door.selected-clinic'
+const STORAGE_KEY = 'mizan-door.auth-session'
 
 export default function App() {
-  const [clinic, setClinic] = useState<Clinic | null>(null)
+  const [session, setSession] = useState<AuthSession | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      try {
-        setClinic(JSON.parse(stored) as Clinic)
-      } catch {
-        localStorage.removeItem(STORAGE_KEY)
-      }
+    if (!stored) {
+      setReady(true)
+      return
     }
-    setReady(true)
+
+    try {
+      const parsed = JSON.parse(stored) as AuthSession
+      setAuthToken(parsed.access_token)
+      // Verify the token is still valid (it may have expired since the last
+      // visit) before trusting the cached session.
+      fetchMe()
+        .then(() => setSession(parsed))
+        .catch(() => {
+          localStorage.removeItem(STORAGE_KEY)
+          setAuthToken(null)
+        })
+        .finally(() => setReady(true))
+    } catch {
+      localStorage.removeItem(STORAGE_KEY)
+      setReady(true)
+    }
   }, [])
 
-  function handleSelectClinic(selected: Clinic) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(selected))
-    setClinic(selected)
+  function handleAuthenticated(newSession: AuthSession) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(newSession))
+    setAuthToken(newSession.access_token)
+    setSession(newSession)
   }
 
-  function handleSwitchClinic() {
+  function handleLogout() {
     localStorage.removeItem(STORAGE_KEY)
-    setClinic(null)
+    setAuthToken(null)
+    setSession(null)
   }
 
   if (!ready) return null
 
-  return clinic ? (
-    <QueueDashboard clinic={clinic} onSwitchClinic={handleSwitchClinic} />
+  return session ? (
+    <QueueDashboard clinic={session.clinic} onLogout={handleLogout} />
   ) : (
-    <ClinicSelect onSelect={handleSelectClinic} />
+    <AuthScreen onAuthenticated={handleAuthenticated} />
   )
 }

@@ -6,10 +6,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.security import hash_password
 from app.models.clinic import Clinic
 from app.models.patient import Patient
 from app.models.queue_entry import QueueEntry, QueueStatus
-from app.schemas import ClinicCreate, PatientCreate
+from app.models.user import User
+from app.schemas import ClinicCreate, PatientCreate, RegisterRequest
 
 # Queue entries with one of these statuses are considered part of the
 # clinic's "current" (still-in-progress) queue.
@@ -39,6 +41,33 @@ async def get_clinic(db: AsyncSession, clinic_id: uuid.UUID) -> Clinic | None:
 async def list_clinics(db: AsyncSession) -> list[Clinic]:
     result = await db.execute(select(Clinic).order_by(Clinic.created_at))
     return list(result.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# User (clinic staff)
+# ---------------------------------------------------------------------------
+async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
+    result = await db.execute(select(User).where(User.email == email))
+    return result.scalar_one_or_none()
+
+
+async def register_clinic_with_owner(db: AsyncSession, data: RegisterRequest) -> tuple[Clinic, User]:
+    """Create a clinic and its first staff account together, in one transaction."""
+    clinic = Clinic(name=data.clinic_name, specialty=data.specialty)
+    db.add(clinic)
+    await db.flush()  # assigns clinic.id without committing yet
+
+    user = User(
+        clinic_id=clinic.id,
+        email=data.email,
+        hashed_password=hash_password(data.password),
+        full_name=data.full_name,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(clinic)
+    await db.refresh(user)
+    return clinic, user
 
 
 # ---------------------------------------------------------------------------

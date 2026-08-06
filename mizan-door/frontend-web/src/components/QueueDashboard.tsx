@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import axios from 'axios'
 import { LogOut, PhoneCall, RefreshCw, Users } from 'lucide-react'
 import type { Clinic } from '../types'
 import { useClinicQueue } from '../hooks/useClinicQueue'
@@ -10,10 +11,10 @@ import LanguageToggle from './LanguageToggle'
 
 interface QueueDashboardProps {
   clinic: Clinic
-  onSwitchClinic: () => void
+  onLogout: () => void
 }
 
-export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboardProps) {
+export default function QueueDashboard({ clinic, onLogout }: QueueDashboardProps) {
   const { t } = useTranslation()
   const { queue, loading, error, status, refresh } = useClinicQueue(clinic.id)
   const [callingNext, setCallingNext] = useState(false)
@@ -30,7 +31,13 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
       // (triggered by this same call, server-side) keeps every other
       // connected client in sync too.
       await callNextPatient(clinic.id)
-    } catch {
+    } catch (err) {
+      // The staff session may have expired since login; force a fresh login
+      // rather than leaving the receptionist stuck on a broken button.
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        onLogout()
+        return
+      }
       setActionError(t('dashboard.callNextError'))
     } finally {
       setCallingNext(false)
@@ -50,10 +57,10 @@ export default function QueueDashboard({ clinic, onSwitchClinic }: QueueDashboar
             <ConnectionBadge status={status} />
             <button
               type="button"
-              onClick={onSwitchClinic}
+              onClick={onLogout}
               className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100"
             >
-              <LogOut size={14} /> {t('dashboard.switch')}
+              <LogOut size={14} /> {t('dashboard.logout')}
             </button>
           </div>
         </div>

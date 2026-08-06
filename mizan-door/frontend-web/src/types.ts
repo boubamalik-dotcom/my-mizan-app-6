@@ -7,6 +7,23 @@ export interface Clinic {
   created_at: string
 }
 
+/** A clinic staff account (e.g. a receptionist). */
+export interface User {
+  id: string
+  clinic_id: string
+  email: string
+  full_name: string
+  created_at: string
+}
+
+/** Response from POST /auth/register and POST /auth/login. */
+export interface AuthSession {
+  access_token: string
+  token_type: string
+  user: User
+  clinic: Clinic
+}
+
 export interface Patient {
   id: string
   name: string

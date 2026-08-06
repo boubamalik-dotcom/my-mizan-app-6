@@ -9,6 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import crud, schemas
 from app.core.config import settings
 from app.core.database import Base, engine, get_db
+from app.core.security import (
+    create_access_token,
+    get_current_user,
+    require_clinic_access,
+    verify_password,
+)
+from app.models.user import User
 from app.socket_manager import ConnectionManager
 
 manager = ConnectionManager()
@@ -61,10 +68,58 @@ async def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@app.post("/clinics", response_model=schemas.ClinicResponse, status_code=status.HTTP_201_CREATED, tags=["clinics"])
-async def create_clinic(payload: schemas.ClinicCreate, db: AsyncSession = Depends(get_db)) -> schemas.ClinicResponse:
-    clinic = await crud.create_clinic(db, payload)
-    return schemas.ClinicResponse.model_validate(clinic)
+@app.post(
+    "/auth/register",
+    response_model=schemas.TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["auth"],
+)
+async def register(payload: schemas.RegisterRequest, db: AsyncSession = Depends(get_db)) -> schemas.TokenResponse:
+    """Register a new clinic together with its first staff account (the receptionist)."""
+    existing = await crud.get_user_by_email(db, payload.email)
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    clinic, user = await crud.register_clinic_with_owner(db, payload)
+    token = create_access_token(user.id, clinic.id)
+    return schemas.TokenResponse(
+        access_token=token,
+        user=schemas.UserResponse.model_validate(user),
+        clinic=schemas.ClinicResponse.model_validate(clinic),
+    )
+
+
+@app.post("/auth/login", response_model=schemas.TokenResponse, tags=["auth"])
+async def login(payload: schemas.LoginRequest, db: AsyncSession = Depends(get_db)) -> schemas.TokenResponse:
+    user = await crud.get_user_by_email(db, payload.email)
+    if user is None or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    clinic = await crud.get_clinic(db, user.clinic_id)
+    if clinic is None:
+        # Should never happen (FK + cascade delete keep this consistent), but
+        # guard against it rather than returning a broken response.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+
+    token = create_access_token(user.id, clinic.id)
+    return schemas.TokenResponse(
+        access_token=token,
+        user=schemas.UserResponse.model_validate(user),
+        clinic=schemas.ClinicResponse.model_validate(clinic),
+    )
+
+
+@app.get("/auth/me", response_model=schemas.MeResponse, tags=["auth"])
+async def me(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> schemas.MeResponse:
+    clinic = await crud.get_clinic(db, current_user.clinic_id)
+    if clinic is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+    return schemas.MeResponse(
+        user=schemas.UserResponse.model_validate(current_user),
+        clinic=schemas.ClinicResponse.model_validate(clinic),
+    )
 
 
 @app.get("/clinics", response_model=list[schemas.ClinicResponse], tags=["clinics"])
@@ -151,9 +206,18 @@ async def get_clinic_queue(clinic_id: uuid.UUID, db: AsyncSession = Depends(get_
     tags=["queue"],
 )
 async def call_next_patient(
-    clinic_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    clinic_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> list[schemas.QueueEntryResponse]:
-    """Complete the current consultation, call the next patient, and broadcast the new queue."""
+    """Complete the current consultation, call the next patient, and broadcast the new queue.
+
+    Staff-only: requires a valid login, and only for the clinic the
+    authenticated user belongs to (a receptionist can't call patients for a
+    different clinic).
+    """
+    require_clinic_access(current_user, clinic_id)
+
     clinic = await crud.get_clinic(db, clinic_id)
     if clinic is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")

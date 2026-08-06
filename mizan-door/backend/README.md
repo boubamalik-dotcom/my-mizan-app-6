@@ -1,4 +1,4 @@
-# Mizan Door — Backend (Step 1 + Step 2 + Step 3 additions)
+# Mizan Door — Backend
 
 FastAPI backend for the Mizan Door smart virtual queue system for clinics.
 
@@ -15,6 +15,9 @@ FastAPI backend for the Mizan Door smart virtual queue system for clinics.
   app reuse an existing patient record by phone number instead of hitting
   the unique-phone `409` when a returning patient joins from a new device
   (see `../frontend_mobile/`).
+- **Staff authentication**: real accounts (email + password + JWT) for clinic
+  staff, replacing the earlier "just pick a clinic" placeholder. See
+  "Authentication" below.
 
 ## Folder structure
 
@@ -27,11 +30,13 @@ backend/
 │   ├── socket_manager.py       # ConnectionManager: WebSockets <-> Redis pub/sub bridge
 │   ├── core/
 │   │   ├── config.py          # Settings loaded from environment (.env)
-│   │   └── database.py        # Async SQLAlchemy engine/session, Base, get_db()
+│   │   ├── database.py        # Async SQLAlchemy engine/session, Base, get_db()
+│   │   └── security.py        # Password hashing, JWT issuing/verification, get_current_user
 │   └── models/                 # SQLAlchemy ORM models
 │       ├── clinic.py
 │       ├── patient.py
-│       └── queue_entry.py
+│       ├── queue_entry.py
+│       └── user.py             # Clinic staff account (email/password, belongs to one clinic)
 ├── alembic/                     # Database migrations
 │   ├── env.py
 │   └── versions/
@@ -56,7 +61,8 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env to point DATABASE_URL at your PostgreSQL instance,
-# and REDIS_URL at your Redis instance
+# REDIS_URL at your Redis instance, and set a real JWT_SECRET_KEY
+# (see "Authentication" below - the default is dev-only and insecure)
 ```
 
 Create the database (adjust user/password as needed):
@@ -92,21 +98,29 @@ at `http://localhost:8000/docs`.
 | `Clinic` | `clinics` | `id` (UUID), `name`, `specialty`, `created_at` |
 | `Patient` | `patients` | `id` (UUID), `name`, `phone` (unique), `created_at` |
 | `QueueEntry` | `queue_entries` | `id` (UUID), `clinic_id` (FK), `patient_id` (FK), `queue_number`, `status` (`waiting` \| `in_consultation` \| `completed` \| `cancelled`), `is_urgent`, `joined_at` |
+| `User` | `users` | `id` (UUID), `clinic_id` (FK), `email` (unique), `hashed_password`, `full_name`, `created_at` — a clinic staff account |
 
 `queue_number` is assigned automatically per clinic, resetting daily (based on
 `joined_at`). Queue listings sort urgent entries first, then by ticket number.
 
 ## REST API
 
-| Method | Path | Description |
-|---|---|---|
-| POST | `/clinics` | Create a clinic (`name`, `specialty`) |
-| GET | `/clinics` | List all clinics (used by the dashboard's clinic picker) |
-| GET | `/clinics/{clinic_id}` | Get a single clinic |
-| POST | `/patients` | Register a patient (`name`, `phone` — must be unique, `409` on duplicate) |
-| GET | `/patients/by-phone/{phone}` | Look up an existing patient by phone (used by the mobile app so a returning patient can join from a new device without re-registering) |
-| POST | `/clinics/{clinic_id}/queue` | Add a patient to the clinic's queue (`patient_id`, `is_urgent`) — assigns the next ticket number (scoped per clinic, reset daily) and broadcasts the updated queue over the clinic's WebSocket |
-| GET | `/clinics/{clinic_id}/queue` | Get the clinic's current active queue (`waiting` / `in_consultation` entries), urgent first, then by ticket number |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/auth/register` | — | Create a clinic **and** its first staff account together (`clinic_name`, `specialty`, `full_name`, `email`, `password`) — returns a JWT + user + clinic. `409` if the email is already registered |
+| POST | `/auth/login` | — | Log in with `email` + `password` — returns a JWT + user + clinic. `401` on invalid credentials |
+| GET | `/auth/me` | 🔒 | Get the authenticated user + their clinic |
+| GET | `/clinics` | — | List all clinics (used by the patient app's clinic picker) |
+| GET | `/clinics/{clinic_id}` | — | Get a single clinic |
+| POST | `/patients` | — | Register a patient (`name`, `phone` — must be unique, `409` on duplicate) |
+| GET | `/patients/by-phone/{phone}` | — | Look up an existing patient by phone (used by the mobile app so a returning patient can join from a new device without re-registering) |
+| POST | `/clinics/{clinic_id}/queue` | — | Add a patient to the clinic's queue (`patient_id`, `is_urgent`) — assigns the next ticket number (scoped per clinic, reset daily) and broadcasts the updated queue over the clinic's WebSocket |
+| GET | `/clinics/{clinic_id}/queue` | — | Get the clinic's current active queue (`waiting` / `in_consultation` entries), urgent first, then by ticket number |
+| POST | `/clinics/{clinic_id}/next` | 🔒 | Call the next patient (see below) |
+
+🔒 = requires `Authorization: Bearer <token>`. Endpoints without 🔒 are
+intentionally public — patients never log in in this design (see
+"Authentication" below).
 
 Health checks: `GET /` and `GET /health`.
 
@@ -114,10 +128,39 @@ Both `clinic_id` and `patient_id` are validated to exist; unknown ids return `40
 
 ### Calling the next patient — `POST /clinics/{clinic_id}/next`
 
-Completes the patient currently `in_consultation` (if any) and promotes the
-next `waiting` patient (urgent first, then by ticket number) to
+Staff-only. Completes the patient currently `in_consultation` (if any) and
+promotes the next `waiting` patient (urgent first, then by ticket number) to
 `in_consultation`. Returns the clinic's updated active queue and also
-broadcasts it in real time (see below).
+broadcasts it in real time (see below). Requires a valid token *for that
+clinic* — a receptionist authenticated for one clinic gets `403` if they try
+to call patients for a different `clinic_id`.
+
+## Authentication
+
+Clinic staff (e.g. receptionists) now have real accounts instead of the
+earlier "just pick a clinic from a list" placeholder:
+
+- **Registering a clinic** (`POST /auth/register`) creates the `Clinic` row
+  and its first `User` in one transaction, so a clinic always has at least
+  one owner account. There's no separate "create a clinic with no staff"
+  endpoint anymore.
+- **Passwords** are hashed with `bcrypt` (`app/core/security.py`) — never
+  stored or returned in plaintext.
+- **Tokens** are signed JWTs (`PyJWT`, HS256) containing the user id and
+  clinic id, valid for `ACCESS_TOKEN_EXPIRE_MINUTES` (default 12 hours — about
+  one staff shift). `get_current_user` (a FastAPI dependency) decodes the
+  `Authorization: Bearer <token>` header and loads the `User`; 🔒 routes use
+  it, plus `require_clinic_access` to enforce the token's `clinic_id` matches
+  the `clinic_id` in the URL.
+- **`JWT_SECRET_KEY`** defaults to an insecure dev value
+  (`dev-insecure-secret-change-in-production`) — **always** override it via
+  the environment in any shared/deployed environment; anyone who knows this
+  secret can forge a valid staff token for any clinic.
+- **Patients are intentionally not authenticated.** The original spec only
+  calls for receptionist login ("Simple authentication for the clinic
+  receptionist"); patient identity is just name + phone (see
+  `../frontend_mobile/README.md`'s "Known limitations" for the tradeoffs of
+  that design).
 
 ## Real-time updates (WebSockets + Redis)
 
@@ -164,11 +207,11 @@ alembic revision --autogenerate -m "describe the change"
 alembic upgrade head
 ```
 
-## What's next (Step 3 & 4)
+## Known limitations
 
-- Step 3 — Clinic Dashboard: React + Vite + Tailwind app with login, queue
-  list, "Call Next Patient" button, connected to the REST API and the
-  `/ws/clinics/{clinic_id}` WebSocket for real-time sync.
-- Step 4 — Patient App: Flutter + Riverpod app with queue join flow, triage
-  questions, real-time ticket tracking via `web_socket_channel`, and
-  push/local notifications.
+- No refresh tokens or token revocation (e.g. no way to invalidate a token
+  before it expires, such as on password change) — acceptable for an MVP
+  with a 12-hour expiry, but worth adding before a real production launch.
+- No rate limiting on `/auth/login` (brute-force protection).
+- No patient identity verification (no OTP/SMS) — see
+  `../frontend_mobile/README.md`.

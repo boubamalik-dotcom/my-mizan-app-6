@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.queue_entry import QueueStatus
 
@@ -16,7 +16,7 @@ class ClinicBase(BaseModel):
 
 
 class ClinicCreate(ClinicBase):
-    """Payload for POST /clinics."""
+    """Used internally when registering a clinic together with its first staff account."""
 
 
 class ClinicResponse(ClinicBase):
@@ -24,6 +24,46 @@ class ClinicResponse(ClinicBase):
 
     id: uuid.UUID
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Auth (clinic staff)
+# ---------------------------------------------------------------------------
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    clinic_id: uuid.UUID
+    email: EmailStr
+    full_name: str
+    created_at: datetime
+
+
+class RegisterRequest(BaseModel):
+    """Payload for POST /auth/register - creates a clinic and its first staff account together."""
+
+    clinic_name: str = Field(..., min_length=1, max_length=255)
+    specialty: str = Field(..., min_length=1, max_length=255)
+    full_name: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+    clinic: ClinicResponse
+
+
+class MeResponse(BaseModel):
+    user: UserResponse
+    clinic: ClinicResponse
 
 
 # ---------------------------------------------------------------------------

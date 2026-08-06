@@ -13,6 +13,14 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    # WARNING: this default is only safe for local development. Always set
+    # JWT_SECRET_KEY to a long random value via the environment in any
+    # deployed environment - anyone who knows this secret can forge staff
+    # login tokens for any clinic.
+    jwt_secret_key: str = "dev-insecure-secret-change-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 12  # 12 hours, ~ one staff shift
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
