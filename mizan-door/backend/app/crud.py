@@ -104,3 +104,40 @@ async def get_clinic_queue(db: AsyncSession, clinic_id: uuid.UUID) -> list[Queue
         .order_by(QueueEntry.is_urgent.desc(), QueueEntry.queue_number.asc())
     )
     return list(result.scalars().all())
+
+
+async def advance_queue(db: AsyncSession, clinic_id: uuid.UUID) -> None:
+    """Call the next patient: complete the current consultation and promote the next one.
+
+    - Whoever is currently `in_consultation` for this clinic is marked `completed`.
+    - The next `waiting` patient (urgent first, then by `queue_number`) is
+      promoted to `in_consultation`.
+
+    If there is no one currently in consultation, only the promotion happens
+    (this is the "start of day" / first call case). If there is no one
+    waiting, only the completion happens.
+    """
+    current_result = await db.execute(
+        select(QueueEntry).where(
+            QueueEntry.clinic_id == clinic_id,
+            QueueEntry.status == QueueStatus.IN_CONSULTATION,
+        )
+    )
+    current_entry = current_result.scalars().first()
+    if current_entry is not None:
+        current_entry.status = QueueStatus.COMPLETED
+
+    next_result = await db.execute(
+        select(QueueEntry)
+        .where(
+            QueueEntry.clinic_id == clinic_id,
+            QueueEntry.status == QueueStatus.WAITING,
+        )
+        .order_by(QueueEntry.is_urgent.desc(), QueueEntry.queue_number.asc())
+        .limit(1)
+    )
+    next_entry = next_result.scalars().first()
+    if next_entry is not None:
+        next_entry.status = QueueStatus.IN_CONSULTATION
+
+    await db.commit()

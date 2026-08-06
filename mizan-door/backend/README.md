@@ -1,19 +1,22 @@
-# Mizan Door — Backend (Step 1: Setup & Database)
+# Mizan Door — Backend (Step 1 + Step 2)
 
 FastAPI backend for the Mizan Door smart virtual queue system for clinics.
 
-This is **Step 1** of the implementation plan: project structure, PostgreSQL
-connection, SQLAlchemy models, Alembic migrations, and basic CRUD REST
-endpoints. WebSockets and Redis pub/sub for real-time updates land in Step 2.
+- **Step 1**: project structure, PostgreSQL connection, SQLAlchemy models,
+  Alembic migrations, and basic CRUD REST endpoints.
+- **Step 2**: real-time engine — Redis pub/sub, a WebSocket `ConnectionManager`,
+  `POST /clinics/{clinic_id}/next` to call the next patient, and
+  `WS /ws/clinics/{clinic_id}` for live queue updates.
 
 ## Folder structure
 
 ```
 backend/
 ├── app/
-│   ├── main.py                # FastAPI app, lifespan (create_all), CORS, REST routes
+│   ├── main.py                # FastAPI app, lifespan (create_all + Redis), CORS, REST + WS routes
 │   ├── schemas.py              # Pydantic request/response models
 │   ├── crud.py                 # Async SQLAlchemy CRUD functions
+│   ├── socket_manager.py       # ConnectionManager: WebSockets <-> Redis pub/sub bridge
 │   ├── core/
 │   │   ├── config.py          # Settings loaded from environment (.env)
 │   │   └── database.py        # Async SQLAlchemy engine/session, Base, get_db()
@@ -33,6 +36,7 @@ backend/
 
 - Python 3.11+
 - PostgreSQL 14+
+- Redis 6+
 
 ## Setup
 
@@ -43,7 +47,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# edit .env to point DATABASE_URL at your PostgreSQL instance
+# edit .env to point DATABASE_URL at your PostgreSQL instance,
+# and REDIS_URL at your Redis instance
 ```
 
 Create the database (adjust user/password as needed):
@@ -96,6 +101,49 @@ Health checks: `GET /` and `GET /health`.
 
 Both `clinic_id` and `patient_id` are validated to exist; unknown ids return `404`.
 
+### Calling the next patient — `POST /clinics/{clinic_id}/next`
+
+Completes the patient currently `in_consultation` (if any) and promotes the
+next `waiting` patient (urgent first, then by ticket number) to
+`in_consultation`. Returns the clinic's updated active queue and also
+broadcasts it in real time (see below).
+
+## Real-time updates (WebSockets + Redis)
+
+`app/socket_manager.py` defines `ConnectionManager`, which bridges WebSocket
+clients to Redis pub/sub:
+
+- Clients connect to `WS /ws/clinics/{clinic_id}` and are tracked in
+  `active_connections: dict[UUID, list[WebSocket]]`.
+- On the first connection for a given clinic, the manager subscribes to that
+  clinic's Redis channel (`clinic_queue_{clinic_id}`) via `pubsub_listener`,
+  which re-broadcasts every message it receives to that clinic's
+  locally-connected WebSockets.
+- `POST /clinics/{clinic_id}/next` calls `manager.broadcast_queue_update(...)`,
+  which publishes the clinic's fresh queue state as JSON to
+  `clinic_queue_{clinic_id}`:
+
+  ```json
+  {
+    "event": "queue_updated",
+    "clinic_id": "<uuid>",
+    "queue": [ /* same shape as GET /clinics/{clinic_id}/queue */ ]
+  }
+  ```
+
+Publishing through Redis (rather than broadcasting directly in-process) means
+the dashboard and patient app stay in sync even if the API runs as multiple
+replicas, since every replica's `pubsub_listener` receives the same message.
+
+Disconnects are handled by catching `WebSocketDisconnect` in the `/ws/...`
+endpoint and calling `manager.disconnect(...)`, which removes the socket from
+`active_connections` and cancels that clinic's listener task once no clients
+remain.
+
+The Redis connection is opened in `lifespan` on startup
+(`manager.connect_redis(...)`) and closed on shutdown
+(`manager.close_redis()`, which also cancels any running listener tasks).
+
 ## Migrations
 
 Generate a new migration after changing models:
@@ -105,9 +153,11 @@ alembic revision --autogenerate -m "describe the change"
 alembic upgrade head
 ```
 
-## What's next (Step 2)
+## What's next (Step 3 & 4)
 
-- Redis connection and pub/sub.
-- `ConnectionManager` for WebSocket clients.
-- `POST /clinics/{clinic_id}/next` to call the next patient (updates DB + publishes to Redis).
-- `WS /ws/clinics/{clinic_id}` for the dashboard and patient app to receive real-time updates.
+- Step 3 — Clinic Dashboard: React + Vite + Tailwind app with login, queue
+  list, "Call Next Patient" button, connected to the REST API and the
+  `/ws/clinics/{clinic_id}` WebSocket for real-time sync.
+- Step 4 — Patient App: Flutter + Riverpod app with queue join flow, triage
+  questions, real-time ticket tracking via `web_socket_channel`, and
+  push/local notifications.

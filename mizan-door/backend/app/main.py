@@ -2,13 +2,16 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import crud, schemas
 from app.core.config import settings
 from app.core.database import Base, engine, get_db
+from app.socket_manager import ConnectionManager
+
+manager = ConnectionManager()
 
 
 @asynccontextmanager
@@ -17,7 +20,10 @@ async def lifespan(app: FastAPI):
     # development; use Alembic migrations (see alembic/) for staging/production.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    await manager.connect_redis(settings.redis_url)
     yield
+    await manager.close_redis()
 
 
 app = FastAPI(
@@ -98,3 +104,40 @@ async def get_clinic_queue(clinic_id: uuid.UUID, db: AsyncSession = Depends(get_
 
     entries = await crud.get_clinic_queue(db, clinic_id)
     return [schemas.QueueEntryResponse.model_validate(entry) for entry in entries]
+
+
+@app.post(
+    "/clinics/{clinic_id}/next",
+    response_model=list[schemas.QueueEntryResponse],
+    tags=["queue"],
+)
+async def call_next_patient(
+    clinic_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> list[schemas.QueueEntryResponse]:
+    """Complete the current consultation, call the next patient, and broadcast the new queue."""
+    clinic = await crud.get_clinic(db, clinic_id)
+    if clinic is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+
+    await crud.advance_queue(db, clinic_id)
+
+    entries = await crud.get_clinic_queue(db, clinic_id)
+    response = [schemas.QueueEntryResponse.model_validate(entry) for entry in entries]
+
+    queue_payload = [entry.model_dump(mode="json") for entry in response]
+    await manager.broadcast_queue_update(clinic_id, queue_payload)
+
+    return response
+
+
+@app.websocket("/ws/clinics/{clinic_id}")
+async def clinic_queue_websocket(websocket: WebSocket, clinic_id: uuid.UUID) -> None:
+    """Real-time queue updates for a clinic, consumed by the dashboard and patient app."""
+    await manager.connect(websocket, clinic_id)
+    try:
+        while True:
+            # Clients don't need to send anything; this just keeps the
+            # connection open and detects disconnects.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, clinic_id)

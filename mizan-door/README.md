@@ -13,9 +13,10 @@ subfolder here.
       structure, async PostgreSQL connection (SQLAlchemy + asyncpg), ORM
       models (`Clinic`, `Patient`, `QueueEntry`), Alembic migrations, and
       basic CRUD REST endpoints.
-- [ ] **Step 2 — Real-time Engine**: Redis connection, `ConnectionManager`
-      for WebSockets, `POST /clinics/{clinic_id}/next` (updates DB + Redis
-      publish), `WS /ws/clinics/{clinic_id}`.
+- [x] **Step 2 — Real-time Engine** (`backend/app/socket_manager.py`): Redis
+      pub/sub connection, `ConnectionManager` for WebSockets,
+      `POST /clinics/{clinic_id}/next` (updates DB + publishes to Redis),
+      `WS /ws/clinics/{clinic_id}` for live queue updates.
 - [ ] **Step 3 — Clinic Dashboard** (`dashboard/`): React + Vite + Tailwind
       app with login, queue list, "Call Next Patient" button, real-time sync.
 - [ ] **Step 4 — Patient App** (`mobile_app/`): Flutter + Riverpod app with
