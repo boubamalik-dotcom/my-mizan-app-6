@@ -16,9 +16,12 @@ from fastapi import FastAPI
 
 from config import get_settings
 from src.layer_2_api.controllers.chat_controller import ChatController
+from src.layer_2_api.controllers.wallet_controller import WalletController
 from src.layer_2_api.main_router import api_router
 from src.layer_3_business.chat.chat_service import ChatService, MessageRateLimiter
+from src.layer_3_business.wallet.wallet_service import WalletService
 from src.layer_4_data_access.events.message_broker import RedisMessageBroker
+from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.db_config import init_models
 from src.layer_5_storage.implementations.chat_repository_impl import (
     SqlAlchemyChatRepository,
@@ -53,8 +56,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         broker=message_broker,
     )
 
+    wallet_controller = WalletController(
+        wallet_service=WalletService(),
+        unit_of_work_factory=UnitOfWork,
+    )
+
     app.state.message_broker = message_broker
     app.state.chat_controller = chat_controller
+    app.state.wallet_controller = wallet_controller
 
     logger.info("%s started (environment=%s)", settings.app_name, settings.environment)
     try:
