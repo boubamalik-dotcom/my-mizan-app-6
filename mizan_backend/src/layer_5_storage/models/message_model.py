@@ -61,6 +61,8 @@ class ChatThreadModel(Base, TimestampMixin):
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        """Compact representation for logs/debuggers, not part of any
+        public API contract."""
         return f"ChatThreadModel(id={self.id!r}, title={self.title!r})"
 
 
@@ -90,6 +92,8 @@ class ChatParticipantModel(Base, TimestampMixin):
     thread: Mapped["ChatThreadModel"] = relationship(back_populates="participants")
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        """Compact representation for logs/debuggers, not part of any
+        public API contract."""
         return (
             f"ChatParticipantModel(thread_id={self.thread_id!r}, "
             f"user_id={self.user_id!r}, left_at={self.left_at!r})"
@@ -123,6 +127,8 @@ class ChatMessageModel(Base, TimestampMixin):
     thread: Mapped["ChatThreadModel"] = relationship(back_populates="messages")
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        """Compact representation for logs/debuggers, not part of any
+        public API contract."""
         return (
             f"ChatMessageModel(id={self.id!r}, thread_id={self.thread_id!r}, "
             f"sender_id={self.sender_id!r}, type={self.type!r})"

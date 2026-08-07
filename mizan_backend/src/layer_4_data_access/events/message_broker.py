@@ -85,6 +85,14 @@ class RedisMessageBroker(MessageBroker):
         channel_prefix: str = DEFAULT_CHANNEL_PREFIX,
         connect_timeout_seconds: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     ) -> None:
+        """Configures a broker instance for `redis_url` without
+        connecting yet — call `connect()` before publishing or
+        subscribing.
+
+        `channel_prefix` namespaces every Redis channel this instance
+        uses (e.g. so tests can use a unique prefix and never collide
+        with production traffic on the same Redis server).
+        """
         self._redis_url = redis_url
         self._channel_prefix = channel_prefix
         self._connect_timeout_seconds = connect_timeout_seconds
@@ -92,9 +100,15 @@ class RedisMessageBroker(MessageBroker):
 
     @property
     def is_connected(self) -> bool:
+        """Whether `connect()` has successfully established a client
+        connection that hasn't since been closed."""
         return self._client is not None
 
     async def connect(self) -> None:
+        """Establishes the Redis connection and verifies it with a
+        `PING`. Idempotent: a second call while already connected is a
+        no-op. Raises `MessageBrokerError` if Redis is unreachable
+        within `connect_timeout_seconds`."""
         if self._client is not None:
             return
 
@@ -113,6 +127,8 @@ class RedisMessageBroker(MessageBroker):
         logger.info("Connected to Redis message broker at %s", self._redis_url)
 
     async def disconnect(self) -> None:
+        """Closes the Redis connection. Safe to call even if never
+        connected, or if the underlying connection already dropped."""
         if self._client is None:
             return
         with contextlib.suppress(RedisError):
@@ -121,6 +137,13 @@ class RedisMessageBroker(MessageBroker):
         logger.info("Disconnected from Redis message broker.")
 
     async def publish(self, room_id: str, payload: Mapping[str, Any]) -> None:
+        """Publishes `payload` to every current subscriber of
+        `room_id`, across every connected server instance.
+
+        Raises `MessageBrokerError` if `connect()` was never awaited,
+        `payload` is not JSON-serializable, or the publish itself
+        fails (e.g. the connection dropped).
+        """
         client = self._require_client()
         channel = self._channel_name(room_id)
         try:
@@ -141,6 +164,16 @@ class RedisMessageBroker(MessageBroker):
     async def subscribe(
         self, room_id: str
     ) -> AsyncIterator[AsyncIterator[Mapping[str, Any]]]:
+        """Subscribes to `room_id` for the lifetime of the returned
+        async context manager, yielding an async iterator of decoded
+        JSON payloads published to it.
+
+        The Redis subscription (and its background pub/sub connection)
+        is automatically unsubscribed and released when the `async
+        with` block exits, even on error or cancellation. Raises
+        `MessageBrokerError` if `connect()` was never awaited or the
+        subscribe call itself fails.
+        """
         client = self._require_client()
         channel = self._channel_name(room_id)
         pubsub = client.pubsub()

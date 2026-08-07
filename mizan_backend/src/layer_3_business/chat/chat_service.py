@@ -83,14 +83,18 @@ class ChatRoom:
     max_participants: int = DEFAULT_MAX_PARTICIPANTS
 
     def has_participant(self, user_id: str) -> bool:
+        """Returns whether `user_id` currently holds membership in this
+        room."""
         return user_id in self.participant_ids
 
     @property
     def participant_count(self) -> int:
+        """The number of users currently in the room."""
         return len(self.participant_ids)
 
     @property
     def is_full(self) -> bool:
+        """Whether the room has reached `max_participants`."""
         return self.participant_count >= self.max_participants
 
 
@@ -107,6 +111,7 @@ class ChatSession:
 
     @property
     def is_active(self) -> bool:
+        """Whether the session has not yet been closed."""
         return self.ended_at is None
 
     def close(self, *, at: Optional[datetime] = None) -> "ChatSession":
@@ -139,6 +144,11 @@ class MessageRateLimiter:
         max_messages: int = DEFAULT_RATE_LIMIT_MESSAGES,
         window_seconds: float = DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
     ) -> None:
+        """Configures the limiter to allow at most `max_messages`
+        messages per user within any rolling `window_seconds` window.
+
+        Raises `ValueError` if either bound is not strictly positive.
+        """
         if max_messages <= 0:
             raise ValueError("max_messages must be positive.")
         if window_seconds <= 0:
@@ -186,6 +196,13 @@ class ChatService:
         min_message_length: int = MIN_MESSAGE_LENGTH,
         rate_limiter: Optional[MessageRateLimiter] = None,
     ) -> None:
+        """Constructs the service with injectable configuration.
+
+        `rate_limiter` defaults to a fresh `MessageRateLimiter` with
+        the module's default limits; pass a shared instance if
+        multiple `ChatService` calls need to observe the same rate
+        limit state, or a stub in tests.
+        """
         self._max_message_length = max_message_length
         self._min_message_length = min_message_length
         self._rate_limiter = rate_limiter or MessageRateLimiter()

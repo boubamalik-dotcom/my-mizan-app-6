@@ -41,15 +41,22 @@ class ConnectionManager:
     """
 
     def __init__(self) -> None:
+        """Creates an empty connection registry."""
         self._connections: Dict[str, Dict[str, WebSocket]] = defaultdict(dict)
         self._lock = asyncio.Lock()
 
     async def connect(self, room_id: str, client_id: str, websocket: WebSocket) -> None:
+        """Accepts `websocket` and registers it under `room_id`/
+        `client_id`, replacing any prior connection for the same pair
+        (e.g. a stale connection from a dropped reconnect)."""
         await websocket.accept()
         async with self._lock:
             self._connections[room_id][client_id] = websocket
 
     async def disconnect(self, room_id: str, client_id: str) -> None:
+        """Removes the registered connection for `client_id` in
+        `room_id`, if any. Safe to call for an already-removed or
+        never-registered pair."""
         async with self._lock:
             room_connections = self._connections.get(room_id)
             if room_connections is None:
@@ -77,6 +84,8 @@ class ConnectionManager:
                 await self.disconnect(room_id, client_id)
 
     def has_local_connections(self, room_id: str) -> bool:
+        """Whether this process currently holds at least one open
+        connection for `room_id`."""
         return bool(self._connections.get(room_id))
 
 
@@ -93,6 +102,14 @@ class ChatController:
         broker: MessageBroker,
         connection_manager: ConnectionManager | None = None,
     ) -> None:
+        """Wires the controller to its collaborators.
+
+        All three (`chat_service`, `repository`, `broker`) are
+        injected rather than constructed here, so the controller can
+        be exercised in tests with fakes/stubs for each — it never
+        instantiates a concrete `ChatService`, database repository, or
+        Redis client itself.
+        """
         self._service = chat_service
         self._repository = repository
         self._broker = broker
@@ -195,6 +212,11 @@ class ChatController:
     # -- REST history -----------------------------------------------------
 
     async def get_history(self, *, room_id: str, limit: int = 50) -> ChatHistoryResponse:
+        """Fetches up to `limit` messages for `room_id` from Layer 4/5,
+        re-applies Layer 3's ordering rules, and maps the result to the
+        REST response schema — including whether older messages exist
+        beyond this page.
+        """
         raw_messages = await self._repository.get_history(room_id, limit=limit + 1)
         page = self._service.build_history_page(raw_messages, limit=limit)
         has_more = len(raw_messages) > len(page)

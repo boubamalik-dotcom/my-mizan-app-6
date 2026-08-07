@@ -56,6 +56,12 @@ async def get_chat_history(
     limit: int = Query(default=50, ge=1, le=200),
     controller: ChatController = Depends(get_chat_controller),
 ) -> ChatHistoryResponse:
+    """Returns up to `limit` most recent messages for `room_id`,
+    oldest first, plus whether older messages exist beyond this page.
+
+    Raises `HTTPException(400)` if the room/business rules reject the
+    request (translated from a Layer 3 `ChatDomainError`).
+    """
     try:
         return await controller.get_history(room_id=room_id, limit=limit)
     except ChatDomainError as exc:
