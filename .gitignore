@@ -50,6 +50,11 @@ backend/venv/
 backend/*.db
 backend/**/*.db
 
+mizan_backend/.venv/
+mizan_backend/venv/
+mizan_backend/*.db
+mizan_backend/**/*.db
+
 # Flutter
 mobile_app/.dart_tool/
 mobile_app/.flutter-plugins

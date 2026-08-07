@@ -1,0 +1,52 @@
+"""Application-wide configuration.
+
+Centralizes environment-driven settings (database, cache/broker URLs,
+etc.) behind a single, strictly-typed `Settings` object so that no
+layer reaches into `os.environ` directly. Only `main.py` (composition
+root) and the storage/data-access layers that need connection strings
+should ever import this module.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Strictly-typed environment configuration.
+
+    Values are read from environment variables (or a local `.env`
+    file) and validated at startup, so misconfiguration fails fast
+    instead of surfacing as an obscure runtime error deep inside a
+    request handler.
+    """
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_name: str = "Mizan Backend"
+    environment: str = "development"
+    debug: bool = False
+
+    # Layer 5 — storage
+    database_url: str = "sqlite+aiosqlite:///./mizan_backend.db"
+
+    # Layer 4 — cache / pub-sub broker
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Chat Engine tuning
+    chat_message_max_length: int = 4000
+    chat_room_max_participants: int = 200
+    chat_rate_limit_messages: int = 10
+    chat_rate_limit_window_seconds: float = 10.0
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Returns the process-wide `Settings` singleton.
+
+    Cached with `lru_cache` so environment parsing happens exactly
+    once; tests can call `get_settings.cache_clear()` to reload with a
+    different environment.
+    """
+    return Settings()
