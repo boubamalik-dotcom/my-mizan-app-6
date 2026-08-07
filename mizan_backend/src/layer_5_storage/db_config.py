@@ -9,8 +9,9 @@ for production. Migrations belong in `layer_5_storage/migrations/`
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -32,8 +33,30 @@ def build_engine(database_url: Optional[str] = None) -> AsyncEngine:
     process-wide `engine`.
     """
     url = database_url or DEFAULT_DATABASE_URL
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    return create_async_engine(url, echo=False, future=True, connect_args=connect_args)
+    is_sqlite = url.startswith("sqlite")
+    connect_args = {"check_same_thread": False} if is_sqlite else {}
+    new_engine = create_async_engine(
+        url, echo=False, future=True, connect_args=connect_args
+    )
+
+    if is_sqlite:
+        # SQLite does not enforce FOREIGN KEY constraints unless a
+        # connection explicitly opts in — without this, a bad
+        # `wallet_id` on a ledger entry (or any other FK violation)
+        # would silently succeed under the SQLite dev/test database
+        # while correctly raising under Postgres in production. Every
+        # new DBAPI connection this engine opens gets the pragma
+        # applied immediately, so dev/test behaviour matches
+        # production.
+        @event.listens_for(new_engine.sync_engine, "connect")
+        def _enable_sqlite_foreign_keys(
+            dbapi_connection: Any, connection_record: Any
+        ) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+    return new_engine
 
 
 def build_session_factory(bind_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
