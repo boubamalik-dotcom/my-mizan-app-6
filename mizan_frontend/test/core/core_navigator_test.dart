@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mizan_frontend/core/core_navigator.dart';
 import 'package:mizan_frontend/core/mini_program_loader/mini_program_base.dart';
 import 'package:mizan_frontend/core/mini_program_loader/mini_program_loader.dart';
+import 'package:mizan_frontend/features/auth/presentation/pages/login_page.dart';
 import 'package:mizan_frontend/features/chat/presentation/state/chat_cubit.dart';
 import 'package:mizan_frontend/features/chat/presentation/state/chat_state.dart';
 import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
@@ -78,6 +79,42 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(buildTestApp());
   }
+
+  group('startup route stack', () {
+    testWidgets(
+        'a multi-segment initial route generates exactly one route, so no '
+        'dashboard is built behind the login screen',
+        (WidgetTester tester) async {
+      // Flutter's default `onGenerateInitialRoutes` expands
+      // '/auth/login' into ['/', '/auth', '/auth/login']. Because '/' is
+      // the dashboard, the default would build a HostDashboardPage
+      // beneath the login screen before anyone signed in — firing
+      // authenticated wallet/chat calls with no token, and leaving two
+      // ChatCubits fighting over the shared ChatRepository.
+      await tester.pumpWidget(
+        const MaterialApp(
+          initialRoute: CoreRoutes.login,
+          onGenerateInitialRoutes: CoreNavigator.onGenerateInitialRoutes,
+          onGenerateRoute: CoreNavigator.onGenerateRoute,
+        ),
+      );
+      // A single pump, not pumpAndSettle: the login screen's
+      // session-restore spinner animates indefinitely.
+      await tester.pump();
+
+      expect(find.byType(LoginPage), findsOneWidget);
+      expect(find.byType(HostDashboardPage), findsNothing);
+    });
+
+    testWidgets('the generated route is the one that was asked for',
+        (WidgetTester tester) async {
+      final List<Route<dynamic>> routes =
+          CoreNavigator.onGenerateInitialRoutes(CoreRoutes.login);
+
+      expect(routes, hasLength(1));
+      expect(routes.single.settings.name, CoreRoutes.login);
+    });
+  });
 
   testWidgets(
       'dashboard renders a showcase card for every curated mini-program',

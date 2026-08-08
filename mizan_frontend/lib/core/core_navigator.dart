@@ -66,6 +66,27 @@ final class CoreNavigator {
   ///   onGenerateRoute: CoreNavigator.onGenerateRoute,
   /// )
   /// ```
+  /// Builds the startup navigation stack as exactly **one** route.
+  ///
+  /// Flutter's default behaviour splits a multi-segment `initialRoute`
+  /// into a whole stack — `'/auth/login'` generates `'/'`, `'/auth'`,
+  /// *then* `'/auth/login'`. Since `'/'` is [CoreRoutes.dashboard], the
+  /// default would silently build a `HostDashboardPage` underneath the
+  /// login screen before anyone has signed in: it would fire
+  /// authenticated wallet and chat calls with no token, and its
+  /// `ChatCubit` would open a socket that the post-login dashboard's
+  /// `ChatCubit` then fought with over the shared `ChatRepository`,
+  /// leaving the badge stuck on "غير متصل حاليًا" while the socket was
+  /// in fact healthy.
+  ///
+  /// Returning a single route keeps the auth gate meaning what it says:
+  /// nothing behind the login screen exists until the user is past it.
+  static List<Route<dynamic>> onGenerateInitialRoutes(String initialRoute) {
+    return <Route<dynamic>>[
+      onGenerateRoute(RouteSettings(name: initialRoute)),
+    ];
+  }
+
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
       case CoreRoutes.login:

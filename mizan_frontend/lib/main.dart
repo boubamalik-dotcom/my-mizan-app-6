@@ -46,6 +46,7 @@ class MizanApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       initialRoute: CoreRoutes.login,
+      onGenerateInitialRoutes: CoreNavigator.onGenerateInitialRoutes,
       onGenerateRoute: CoreNavigator.onGenerateRoute,
     );
   }

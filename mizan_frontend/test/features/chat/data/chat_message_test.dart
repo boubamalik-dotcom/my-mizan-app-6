@@ -76,6 +76,27 @@ void main() {
       expect(message.createdAt.toUtc(), DateTime.utc(2026, 8, 8, 19, 30));
     });
 
+    test('reads the same instant whether it came from history or the socket',
+        () {
+      // The two sources genuinely differ: the REST history serializes
+      // naive timestamps ("…T19:30:00.5"), while relayed WebSocket frames
+      // carry an explicit offset ("…T19:30:00.5+00:00"). Parsing them
+      // differently would put every history message an offset out from
+      // the live ones.
+      final ChatMessage fromHistory = ChatMessage.fromJson(
+        _payload(createdAt: '2026-08-08T19:30:00.500000'),
+      );
+      final ChatMessage fromSocket = ChatMessage.fromJson(
+        _payload(createdAt: '2026-08-08T19:30:00.500000+00:00'),
+      );
+
+      expect(fromHistory.createdAt, fromSocket.createdAt);
+      expect(
+        fromHistory.createdAt.toUtc(),
+        DateTime.utc(2026, 8, 8, 19, 30, 0, 500),
+      );
+    });
+
     test('rejects a payload missing a required field', () {
       final Map<String, dynamic> payload = _payload()..remove('content');
 
