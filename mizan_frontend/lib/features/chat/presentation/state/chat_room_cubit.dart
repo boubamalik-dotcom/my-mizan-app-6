@@ -112,6 +112,12 @@ class ChatRoomCubit extends Cubit<ChatRoomState> {
             messages: <ChatMessage>[...current.messages, message],
           ),
         );
+
+        // The user is looking at the conversation, so a message that
+        // just arrived in it has been read. Marking read only on entry
+        // would leave the dashboard claiming unread messages the user
+        // had watched arrive.
+        _chatRepository.markAllAsRead();
       },
       onError: (Object _) {
         // Connection-level failures are already surfaced by the

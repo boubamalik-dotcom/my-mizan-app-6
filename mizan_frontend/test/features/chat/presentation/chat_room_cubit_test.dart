@@ -258,6 +258,29 @@ void main() {
       expect((cubit.state as ChatRoomReady).messages, hasLength(1));
     });
 
+    test('marks a message read as it arrives, since the user is looking at it',
+        () async {
+      await cubit.loadRoom();
+      clearInteractions(chatRepository);
+
+      incoming.add(_message(id: 'm1'));
+      await Future<void>.delayed(Duration.zero);
+
+      // Otherwise the dashboard badge would claim unread messages the
+      // user had just watched arrive.
+      verify(() => chatRepository.markAllAsRead()).called(1);
+    });
+
+    test('does not mark read for a message it ignores', () async {
+      await cubit.loadRoom();
+      clearInteractions(chatRepository);
+
+      incoming.add(_message(id: 'other', roomId: 'another-room'));
+      await Future<void>.delayed(Duration.zero);
+
+      verifyNever(() => chatRepository.markAllAsRead());
+    });
+
     test('ignores notices and messages for other rooms', () async {
       await cubit.loadRoom();
 
