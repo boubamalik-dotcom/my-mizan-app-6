@@ -42,6 +42,24 @@ ChatMessage _message({
   });
 }
 
+/// Width of the painted bubble, not of `ChatMessageBubble` itself — that
+/// widget's root is an `Align`, which fills the row by design so the
+/// bubble can sit at either edge.
+double _bubbleWidth(WidgetTester tester) {
+  return tester
+      .getSize(
+        find.descendant(
+          of: find.byType(ChatMessageBubble),
+          matching: find.byType(DecoratedBox),
+        ),
+      )
+      .width;
+}
+
+double _maxBubbleWidth(WidgetTester tester) {
+  return tester.getSize(find.byType(MaterialApp)).width * 0.78;
+}
+
 void main() {
   late MockChatRepository chatRepository;
   late MockAuthRepository authRepository;
@@ -234,6 +252,49 @@ void main() {
         tester.getCenter(find.text('مني')).dx,
         lessThan(tester.getCenter(find.text('منه')).dx),
       );
+    });
+
+    testWidgets('a short message gets a bubble that hugs its content',
+        (WidgetTester tester) async {
+      // Bubbles are capped at 78% of the width, but that is a maximum,
+      // not a target: a two-word message stretched to the cap reads as a
+      // broken layout rather than a conversation.
+      when(
+        () => chatRepository.fetchHistory(
+          clientId: any(named: 'clientId'),
+          roomId: any(named: 'roomId'),
+          limit: any(named: 'limit'),
+        ),
+      ).thenAnswer(
+        (_) async => <ChatMessage>[_message(id: 'm1', content: 'مرحبا')],
+      );
+
+      await pumpPage(tester);
+
+      expect(_bubbleWidth(tester), lessThan(_maxBubbleWidth(tester) * 0.75));
+    });
+
+    testWidgets('a long message wraps within the width cap',
+        (WidgetTester tester) async {
+      when(
+        () => chatRepository.fetchHistory(
+          clientId: any(named: 'clientId'),
+          roomId: any(named: 'roomId'),
+          limit: any(named: 'limit'),
+        ),
+      ).thenAnswer(
+        (_) async => <ChatMessage>[
+          _message(id: 'm1', content: 'مرحبا ' * 60),
+        ],
+      );
+
+      await pumpPage(tester);
+
+      expect(
+        _bubbleWidth(tester),
+        lessThanOrEqualTo(_maxBubbleWidth(tester) + 1),
+      );
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('appends a message arriving over the socket, live',

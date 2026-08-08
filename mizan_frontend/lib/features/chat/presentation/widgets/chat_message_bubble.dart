@@ -82,27 +82,40 @@ class ChatMessageBubble extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
               ],
-              Text(
-                message.content,
-                style: TextStyle(
-                  color: foreground,
-                  fontSize: 15,
-                  height: 1.35,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: Text(
-                  _timeFormat.format(message.createdAt),
-                  textDirection: TextDirection.ltr,
-                  style: TextStyle(
-                    color: isMine
-                        ? Colors.white.withOpacity(0.85)
-                        : MizanColors.textSecondary,
-                    fontSize: 10,
+              // Content and timestamp share a row so the bubble hugs
+              // short messages. An `Align`ed timestamp on its own line
+              // would stretch every bubble to the full 78% regardless of
+              // how little it said, since `Align` fills the width it is
+              // offered.
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Flexible(
+                    child: Text(
+                      message.content,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 15,
+                        height: 1.35,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 1),
+                    child: Text(
+                      _timeFormat.format(message.createdAt),
+                      textDirection: TextDirection.ltr,
+                      style: TextStyle(
+                        color: isMine
+                            ? Colors.white.withOpacity(0.85)
+                            : MizanColors.textSecondary,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
