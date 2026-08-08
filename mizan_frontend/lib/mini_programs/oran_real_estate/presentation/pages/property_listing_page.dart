@@ -65,6 +65,18 @@ class PropertyListingPage extends StatelessWidget {
                   );
                 },
               ),
+              // Pinned above the list rather than scrolling with it: the
+              // match count is the feedback that makes a filter's effect
+              // legible, and it is useless if it scrolls away the moment
+              // the user starts browsing results.
+              BlocBuilder<PropertyListingCubit, PropertyState>(
+                buildWhen: (PropertyState previous, PropertyState current) =>
+                    current is PropertyLoaded || previous is PropertyLoaded,
+                builder: (BuildContext context, PropertyState state) {
+                  if (state is! PropertyLoaded) return const SizedBox.shrink();
+                  return _ResultsHeader(count: state.properties.length);
+                },
+              ),
               Expanded(
                 child: BlocBuilder<PropertyListingCubit, PropertyState>(
                   builder: (BuildContext context, PropertyState state) {
@@ -96,22 +108,20 @@ class _ListingList extends StatelessWidget {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
-        AppSpacing.md,
+        AppSpacing.sm,
         AppSpacing.lg,
         AppSpacing.xl,
       ),
-      // One extra leading row for the results header, plus the showcase
-      // notice when the listings are illustrative.
-      itemCount: state.properties.length + (state.isShowcaseData ? 2 : 1),
+      // One extra leading row for the showcase notice, when the listings
+      // are illustrative. (The results header is pinned by the page, so
+      // it is not part of this list.)
+      itemCount: state.properties.length + (state.isShowcaseData ? 1 : 0),
       itemBuilder: (BuildContext context, int index) {
-        if (index == 0) {
-          return _ResultsHeader(count: state.properties.length);
-        }
-        if (state.isShowcaseData && index == 1) {
+        if (state.isShowcaseData && index == 0) {
           return const _ShowcaseNotice();
         }
 
-        final int offset = state.isShowcaseData ? 2 : 1;
+        final int offset = state.isShowcaseData ? 1 : 0;
         final Property property = state.properties[index - offset];
         return PropertyCard(property: property);
       },
@@ -126,8 +136,14 @@ class _ResultsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+    return Container(
+      color: MizanColors.background,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.xs,
+      ),
       child: Row(
         children: <Widget>[
           Text(

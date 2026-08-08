@@ -256,6 +256,35 @@ void main() {
       ).called(1);
     });
 
+    testWidgets('the match count tracks the filters and survives scrolling',
+        (WidgetTester tester) async {
+      // The count is the feedback that makes a filter's effect legible,
+      // so it is pinned above the list rather than scrolling away with
+      // it.
+      stubCatalogue(<Property>[
+        for (int i = 0; i < 8; i++)
+          _property(
+            id: 'p$i',
+            amenities: i.isEven
+                ? <PropertyAmenity>{PropertyAmenity.privatePool}
+                : const <PropertyAmenity>{},
+          ),
+      ]);
+      await pumpPage(tester);
+
+      expect(find.text('العقارات المتاحة'), findsOneWidget);
+      expect(find.text('8'), findsOneWidget);
+
+      await tester.drag(find.byType(PropertyCard).first, const Offset(0, -400));
+      await tester.pumpAndSettle();
+      expect(find.text('8'), findsOneWidget, reason: 'still pinned');
+
+      await tester.tap(find.widgetWithText(FilterChip, 'مسبح خاص'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('4'), findsOneWidget);
+    });
+
     testWidgets('the chip shows as selected after tapping',
         (WidgetTester tester) async {
       await pumpPage(tester);
