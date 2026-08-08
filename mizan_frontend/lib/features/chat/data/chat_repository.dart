@@ -104,9 +104,14 @@ class ChatRepository {
         }
       },
       onError: (Object error, StackTrace stackTrace) {
+        // The socket is gone either way; record that before notifying,
+        // so anything reacting to the error already sees `isConnected`
+        // report the truth.
+        _remoteDataSource.markDisconnected();
         if (!controller.isClosed) controller.addError(error, stackTrace);
       },
       onDone: () {
+        _remoteDataSource.markDisconnected();
         if (!controller.isClosed) controller.close();
       },
       cancelOnError: false,

@@ -93,6 +93,11 @@ class FakeChatRemoteDataSource extends ChatRemoteDataSource {
     connected = false;
   }
 
+  @override
+  void markDisconnected() {
+    connected = false;
+  }
+
   Future<void> closeAll() async {
     for (final StreamController<dynamic> controller in _controllers) {
       if (!controller.isClosed) await controller.close();
@@ -338,6 +343,47 @@ void main() {
       );
 
       expect((await next).content, 'survived');
+    });
+  });
+
+  group('liveness', () {
+    test('stops reporting connected once the socket stream ends', () async {
+      // A `WebSocketChannel` whose stream is done can no longer deliver
+      // anything, but the channel object lingers — so `isConnected` has
+      // to be told, or the chat room believes a dead socket is up,
+      // leaves its composer enabled, and sends into a closed sink.
+      await repository.connect(clientId: 'alice@example.com');
+      expect(repository.isConnected, isTrue);
+
+      await dataSource.frames.close();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.isConnected, isFalse);
+    });
+
+    test('stops reporting connected after a socket error', () async {
+      await repository.connect(clientId: 'alice@example.com');
+      expect(repository.isConnected, isTrue);
+
+      dataSource.frames.addError(StateError('socket died'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.isConnected, isFalse);
+    });
+
+    test(
+        'a message is refused once the socket has died, rather than being '
+        'written into a dead sink', () async {
+      await repository.connect(clientId: 'alice@example.com');
+
+      await dataSource.frames.close();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        () => repository.sendMessage('مرحبا'),
+        throwsA(isA<ChatConnectionException>()),
+      );
+      expect(dataSource.sentFrames, isEmpty);
     });
   });
 

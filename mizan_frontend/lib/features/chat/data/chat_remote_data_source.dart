@@ -154,6 +154,22 @@ class ChatRemoteDataSource {
         .toList(growable: false);
   }
 
+  /// Forgets the channel after its stream has already terminated.
+  ///
+  /// [isConnected] is what callers use to decide whether they may send,
+  /// so a channel that can no longer deliver anything must stop
+  /// counting as connected. Without this the dead channel lingered:
+  /// `ChatRoomCubit` skipped reconnecting because it believed a socket
+  /// was up, left its composer enabled, and [sendMessage] wrote into a
+  /// closed sink instead of reporting that the message had not been
+  /// sent.
+  ///
+  /// Distinct from [disconnect], which *initiates* a closure; this only
+  /// records one that already happened.
+  void markDisconnected() {
+    _channel = null;
+  }
+
   /// Closes the channel (normal closure) and releases it.
   ///
   /// Safe to call when already disconnected, and safe to call twice —
