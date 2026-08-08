@@ -16,6 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
@@ -175,6 +176,37 @@ class WalletRepository:
             with that id.
         """
         wallet = await self._session.get(WalletModel, wallet_id)
+        return self._to_record(wallet) if wallet is not None else None
+
+    async def get_wallet_by_user_id(self, user_id: str) -> Optional[WalletRecord]:
+        """Fetches the wallet belonging to `user_id`, for
+        `GET /wallet` — the lookup a client uses to find its *own*
+        wallet without already knowing a `wallet_id`.
+
+        A user may in principle hold more than one wallet (one per
+        currency, per `uq_wallet_user_currency`); today's product
+        surface only ever provisions a single wallet per user (see
+        `WalletController.create_wallet`'s `POST /wallet`), so this
+        deterministically returns the *first* one ever created —
+        ordered by `created_at` ascending — rather than an arbitrary
+        row, in case that assumption is ever relaxed later.
+
+        Args:
+            user_id: The id of the user (`UserModel.id`) whose wallet
+                to look up.
+
+        Returns:
+            A `WalletRecord` snapshot of that user's (oldest) wallet,
+            or `None` if they have not provisioned one yet.
+        """
+        statement = (
+            select(WalletModel)
+            .where(WalletModel.user_id == user_id)
+            .order_by(WalletModel.created_at.asc())
+            .limit(1)
+        )
+        result = await self._session.execute(statement)
+        wallet = result.scalar_one_or_none()
         return self._to_record(wallet) if wallet is not None else None
 
     async def update_wallet_balance(

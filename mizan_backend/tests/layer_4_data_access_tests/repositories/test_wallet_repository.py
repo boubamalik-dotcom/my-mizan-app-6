@@ -101,6 +101,35 @@ class TestCreateAndGetWallet:
         with pytest.raises(Exception):  # sqlite/postgres IntegrityError
             await repository.create_wallet(user_id="does-not-exist", currency="USD")
 
+    async def test_get_wallet_by_user_id_round_trips(
+        self, repository: WalletRepository, user_id: str
+    ) -> None:
+        created = await repository.create_wallet(user_id=user_id, currency="USD")
+
+        fetched = await repository.get_wallet_by_user_id(user_id)
+        assert fetched == created
+
+    async def test_get_wallet_by_user_id_returns_none_when_the_user_has_no_wallet(
+        self, repository: WalletRepository, user_id: str
+    ) -> None:
+        assert await repository.get_wallet_by_user_id(user_id) is None
+
+    async def test_get_wallet_by_user_id_never_returns_another_users_wallet(
+        self, repository: WalletRepository, user_id: str, other_user_id: str
+    ) -> None:
+        await repository.create_wallet(user_id=other_user_id, currency="USD")
+
+        assert await repository.get_wallet_by_user_id(user_id) is None
+
+    async def test_get_wallet_by_user_id_returns_the_oldest_wallet_when_the_user_has_several(
+        self, repository: WalletRepository, user_id: str
+    ) -> None:
+        first = await repository.create_wallet(user_id=user_id, currency="USD")
+        await repository.create_wallet(user_id=user_id, currency="EUR")
+
+        fetched = await repository.get_wallet_by_user_id(user_id)
+        assert fetched == first
+
 
 class TestUpdateWalletBalance:
     async def test_updates_balance_and_increments_version(

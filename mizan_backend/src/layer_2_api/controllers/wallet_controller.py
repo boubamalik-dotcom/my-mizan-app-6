@@ -112,6 +112,39 @@ class WalletController:
 
     # -- Read ---------------------------------------------------------------
 
+    async def get_my_wallet(self, *, current_user_id: str) -> WalletRecord:
+        """Fetches the authenticated caller's own wallet, for
+        `GET /wallet` — the lookup a client uses on app start-up to
+        find its wallet without already knowing a `wallet_id` (see
+        `mizan_frontend`'s `WalletRepository.getOrCreateWallet`, which
+        calls this first and only falls back to `POST /wallet` on a
+        **404**).
+
+        No ownership check is needed here (unlike `get_balance`,
+        which is keyed by an arbitrary `wallet_id` that could belong
+        to anyone): the wallet is looked up *by* `current_user_id` in
+        the first place, so whatever is returned is, by construction,
+        already the caller's own.
+
+        Args:
+            current_user_id: The id of the authenticated caller.
+
+        Returns:
+            The caller's `WalletRecord`.
+
+        Raises:
+            HTTPException: 404 if the caller has not provisioned a
+                wallet yet.
+        """
+        async with self._unit_of_work_factory() as uow:
+            wallet = await uow.wallets.get_wallet_by_user_id(current_user_id)
+
+        if wallet is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Wallet not found"
+            )
+        return wallet
+
     async def get_balance(self, wallet_id: str, *, current_user_id: str) -> WalletRecord:
         """Fetches a wallet's current balance and status.
 

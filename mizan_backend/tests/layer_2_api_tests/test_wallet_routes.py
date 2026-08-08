@@ -214,6 +214,61 @@ class TestCreateWallet:
         assert response.status_code in (401, 403)
 
 
+class TestGetMyWallet:
+    async def test_returns_404_when_the_caller_has_not_provisioned_a_wallet_yet(
+        self, client: AsyncClient, alice: Tuple[str, str]
+    ) -> None:
+        _alice_id, alice_token = alice
+        response = await client.get(
+            "/api/v1/wallet", headers=_auth_headers(alice_token)
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Wallet not found"
+
+    async def test_returns_the_callers_own_wallet_when_one_exists(
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
+    ) -> None:
+        alice_id, alice_token = alice
+        response = await client.get(
+            "/api/v1/wallet", headers=_auth_headers(alice_token)
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["wallet_id"] == wallet.id
+        assert body["user_id"] == alice_id
+        assert body["currency"] == "USD"
+        assert Decimal(body["balance"]) == Decimal("100.00")
+        assert body["is_locked"] is False
+
+    async def test_never_returns_another_users_wallet(
+        self, client: AsyncClient, wallet: WalletRecord, bob: Tuple[str, str]
+    ) -> None:
+        """Alice has a wallet; Bob does not. Bob's own `GET /wallet`
+        must 404 — never fall back to someone else's wallet — since
+        the lookup is keyed by the caller's own id, not an arbitrary
+        wallet id."""
+        _bob_id, bob_token = bob
+        response = await client.get(
+            "/api/v1/wallet", headers=_auth_headers(bob_token)
+        )
+        assert response.status_code == 404
+
+    async def test_returns_401_without_a_token(
+        self, client: AsyncClient, wallet: WalletRecord
+    ) -> None:
+        response = await client.get("/api/v1/wallet")
+        assert response.status_code in (401, 403)
+
+    async def test_returns_401_with_a_malformed_token(
+        self, client: AsyncClient, wallet: WalletRecord
+    ) -> None:
+        response = await client.get(
+            "/api/v1/wallet", headers=_auth_headers("not-a-real-jwt")
+        )
+        assert response.status_code == 401
+
+
 class TestGetBalance:
     async def test_returns_wallet_balance(
         self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]

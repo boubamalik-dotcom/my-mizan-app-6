@@ -114,6 +114,41 @@ async def create_wallet(
 
 
 @router.get(
+    "",
+    response_model=WalletBalanceResponse,
+    responses={
+        401: _ERROR_RESPONSES[401],
+        404: {
+            "model": ErrorResponse,
+            "description": "The caller has not provisioned a wallet yet.",
+        },
+    },
+    summary="Fetch the authenticated user's own wallet",
+    description=(
+        "Returns the balance, currency, lock status, and optimistic-"
+        "concurrency version of the wallet belonging to the "
+        "authenticated caller — the lookup a client makes on start-up "
+        "*before* deciding whether it needs to call `POST /wallet` to "
+        "provision one. Returns **404** if the caller has not "
+        "provisioned a wallet yet; it does not create one implicitly."
+    ),
+)
+async def get_my_wallet(
+    controller: WalletController = Depends(get_wallet_controller),
+    current_user: UserRecord = Depends(get_current_user),
+) -> WalletBalanceResponse:
+    """Fetch the authenticated caller's own wallet.
+
+    Requires a valid `Authorization: Bearer <token>` header. Returns
+    **404** if the caller has not provisioned a wallet yet — callers
+    should treat that as "call `POST /wallet` next", not as an error
+    to surface directly to the user.
+    """
+    wallet = await controller.get_my_wallet(current_user_id=current_user.id)
+    return _to_balance_response(wallet)
+
+
+@router.get(
     "/{wallet_id}/balance",
     response_model=WalletBalanceResponse,
     responses={
