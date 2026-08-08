@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/register_page.dart';
+import '../features/chat/presentation/pages/chat_room_page.dart';
 import '../features/dashboard/presentation/pages/dashboard_page.dart';
 import '../features/wallet/presentation/pages/wallet_details_page.dart';
 import '../shared/network/interceptors.dart' show kLoginRouteName;
@@ -39,6 +40,9 @@ final class CoreRoutes {
   /// withdraw, and transfer actions). Pops `true` when the balance
   /// changed while it was open, so the dashboard can refresh.
   static const String walletDetails = '/wallet';
+
+  /// "الدردشة الآمنة" — the chat room: history plus live messaging.
+  static const String chatRoom = '/chat';
 }
 
 /// Host Shell routing table.
@@ -88,6 +92,12 @@ final class CoreNavigator {
         return MaterialPageRoute<bool>(
           settings: settings,
           builder: (_) => const WalletDetailsPage(),
+        );
+
+      case CoreRoutes.chatRoom:
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => const ChatRoomPage(),
         );
 
       case CoreRoutes.miniProgram:

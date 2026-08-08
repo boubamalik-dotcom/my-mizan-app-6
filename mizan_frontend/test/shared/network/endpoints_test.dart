@@ -2,6 +2,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mizan_frontend/shared/network/endpoints.dart';
 
 void main() {
+  group('chatHistory', () {
+    test('percent-encodes the email in the path', () {
+      // An email's `@` is not a legal raw path character.
+      expect(
+        ApiEndpoints.chatHistory('alice@example.com'),
+        '/chat/history/alice%40example.com',
+      );
+    });
+  });
+
   group('ApiEndpoints.webSocketBaseUrl', () {
     test('swaps the REST scheme for its WebSocket equivalent', () {
       // `baseUrl` is a compile-time constant, so assert the derived

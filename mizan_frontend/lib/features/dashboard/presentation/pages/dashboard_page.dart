@@ -141,8 +141,9 @@ class HostDashboardPage extends StatelessWidget {
                                 ChatStatusText(state: state),
                           ),
                           onWalletTap: () => _openWalletDetails(context),
-                          onChatTap: () =>
-                              _showComingSoon(context, 'الدردشة الآمنة'),
+                          onChatTap: () => Navigator.of(context).pushNamed(
+                            CoreRoutes.chatRoom,
+                          ),
                         ),
                         const SizedBox(height: AppSpacing.xl),
 
@@ -239,12 +240,6 @@ class HostDashboardPage extends StatelessWidget {
       CoreRoutes.miniProgram,
       arguments: miniProgramId,
     );
-  }
-
-  void _showComingSoon(BuildContext context, String featureName) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$featureName — قريباً.')));
   }
 }
 

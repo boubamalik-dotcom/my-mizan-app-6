@@ -49,6 +49,19 @@ class ApiEndpoints {
   /// so the caller must already know the recipient's wallet id.
   static const String walletTransfer = '/wallet/transfer';
 
+  // -- Chat (REST) --------------------------------------------------------
+
+  /// `GET` — a room's recent messages, oldest first. Requires a
+  /// `room_id` query parameter (no server-side default) and an optional
+  /// `limit` (1-200, default 50).
+  ///
+  /// [clientId] must be the authenticated caller's own email, exactly
+  /// as for the socket: the backend rejects a mismatch with **403**
+  /// before reading any history. It is percent-encoded because an
+  /// email's `@` is not a legal raw path character.
+  static String chatHistory(String clientId) =>
+      '/chat/history/${Uri.encodeComponent(clientId)}';
+
   // -- Chat (WebSocket) ---------------------------------------------------
 
   /// [baseUrl] with its scheme swapped for the WebSocket equivalent

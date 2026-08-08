@@ -101,6 +101,14 @@ void main() {
             builder: (_) => const Scaffold(body: Text('OPENED_WALLET_DETAILS')),
           );
         }
+        if (settings.name == CoreRoutes.chatRoom) {
+          // Stubbed for the same reason; `chat_room_page_test.dart`
+          // covers the page.
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const Scaffold(body: Text('OPENED_CHAT_ROOM')),
+          );
+        }
         return null;
       },
     );
@@ -396,14 +404,14 @@ void main() {
       expect(find.text('OPENED_WALLET_DETAILS'), findsOneWidget);
     });
 
-    testWidgets('tapping the chat half of the fulcrum card shows a notice',
+    testWidgets('tapping the chat half of the fulcrum card opens the chat room',
         (WidgetTester tester) async {
       await pumpDashboard(tester);
 
       await tester.tap(find.text('الدردشة الآمنة'));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
-      expect(find.text('الدردشة الآمنة — قريباً.'), findsOneWidget);
+      expect(find.text('OPENED_CHAT_ROOM'), findsOneWidget);
     });
   });
 }
