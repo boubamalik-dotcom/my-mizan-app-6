@@ -33,7 +33,8 @@ void main() {
     await tester.pumpWidget(buildTestApp());
   }
 
-  testWidgets('dashboard renders a tile for every registered mini-program',
+  testWidgets(
+      'dashboard renders a showcase card for every curated mini-program',
       (WidgetTester tester) async {
     await pumpDashboard(tester);
 
@@ -42,7 +43,19 @@ void main() {
     expect(find.text('Oran Real Estate'), findsOneWidget);
   });
 
-  testWidgets('tapping a tile lazily loads and opens the mini-program',
+  testWidgets(
+      'dashboard renders the Wallet/Chat fulcrum card and both "scale" section headers',
+      (WidgetTester tester) async {
+    await pumpDashboard(tester);
+
+    expect(find.text('المحفظة الرقمية'), findsOneWidget);
+    expect(find.text('الدردشة الآمنة'), findsOneWidget);
+    expect(find.text('خدمات الأفراد والصحة'), findsOneWidget);
+    expect(find.text('الأعمال والأصول'), findsOneWidget);
+  });
+
+  testWidgets(
+      'tapping the Mizan Door card lazily loads and opens the mini-program',
       (WidgetTester tester) async {
     await pumpDashboard(tester);
 
@@ -68,11 +81,10 @@ void main() {
     await tester.tap(find.text('Oran Real Estate'));
     await tester.pumpAndSettle();
 
-    // Navigated away from the dashboard grid, straight to the
-    // mini-program's own content.
-    expect(find.byType(GridView), findsNothing);
-    expect(find.text('Property listings, tours & agent contact'),
-        findsWidgets);
+    // Navigated away from the dashboard, straight to the mini-program's
+    // own content.
+    expect(find.text('المحفظة الرقمية'), findsNothing);
+    expect(find.text('Property listings, tours & agent contact'), findsWidgets);
 
     // The exact same (already-initialized) instance was reused rather
     // than a fresh one being created and re-initialized.

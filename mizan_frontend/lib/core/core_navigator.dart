@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/register_page.dart';
+import '../features/dashboard/presentation/pages/dashboard_page.dart';
 import '../shared/network/interceptors.dart' show kLoginRouteName;
 import 'mini_program_loader/mini_program_base.dart';
 import 'mini_program_loader/mini_program_loader.dart';
-import 'mini_program_loader/mini_program_registry.dart';
 
 /// Route names recognized by the host shell's [CoreNavigator].
 ///
@@ -102,105 +102,6 @@ final class CoreNavigator {
     return MaterialPageRoute<void>(
       settings: settings,
       builder: (_) => _RouteErrorPage(message: message),
-    );
-  }
-}
-
-/// The Host Shell's main Dashboard: a grid of every mini-program
-/// registered in [MiniProgramRegistry].
-///
-/// This page never hard-codes which mini-programs exist — it simply
-/// renders whatever [MiniProgramRegistry.programs] returns, so adding,
-/// removing, or reordering mini-programs never requires touching this
-/// widget.
-class HostDashboardPage extends StatelessWidget {
-  HostDashboardPage({super.key, MiniProgramRegistry? registry})
-      : _registry = registry ?? MiniProgramRegistry.instance;
-
-  final MiniProgramRegistry _registry;
-
-  @override
-  Widget build(BuildContext context) {
-    final List<MiniProgram> programs = _registry.programs;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mizan')),
-      body: SafeArea(
-        child: programs.isEmpty
-            ? const Center(child: Text('No mini-programs available.'))
-            : GridView.builder(
-                padding: const EdgeInsets.all(16),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 16,
-                  childAspectRatio: 1.0,
-                ),
-                itemCount: programs.length,
-                itemBuilder: (BuildContext context, int index) {
-                  final MiniProgram program = programs[index];
-                  return _MiniProgramTile(
-                    key: ValueKey<String>(program.id),
-                    program: program,
-                    onTap: () => Navigator.of(context).pushNamed(
-                      CoreRoutes.miniProgram,
-                      arguments: program.id,
-                    ),
-                  );
-                },
-              ),
-      ),
-    );
-  }
-}
-
-/// A single tappable dashboard tile representing one mini-program.
-class _MiniProgramTile extends StatelessWidget {
-  const _MiniProgramTile(
-      {super.key, required this.program, required this.onTap});
-
-  final MiniProgram program;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: program.accentColor.withOpacity(0.12),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: program.accentColor,
-                child: Icon(program.icon, color: Colors.white, size: 28),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                program.title,
-                textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                program.description,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
