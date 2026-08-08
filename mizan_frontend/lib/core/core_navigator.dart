@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../features/auth/presentation/pages/login_page.dart';
+import '../features/auth/presentation/pages/register_page.dart';
+import '../shared/network/interceptors.dart' show kLoginRouteName;
 import 'mini_program_loader/mini_program_base.dart';
 import 'mini_program_loader/mini_program_loader.dart';
 import 'mini_program_loader/mini_program_registry.dart';
@@ -18,6 +21,18 @@ final class CoreRoutes {
   /// A dynamically-loaded mini-program. Requires the mini-program's
   /// [MiniProgram.id] as the route's `arguments`.
   static const String miniProgram = '/mini-program';
+
+  /// "تسجيل الدخول" — the Host Shell's unauthenticated entry point.
+  ///
+  /// Reuses `shared/network/interceptors.dart`'s [kLoginRouteName]
+  /// rather than redeclaring the string, since `AuthInterceptor`
+  /// (which lives in `shared/` and must never depend on `core/`)
+  /// also needs to name this exact route to force a logout redirect
+  /// on a `401`. This keeps the two in permanent agreement.
+  static const String login = kLoginRouteName;
+
+  /// "إنشاء حساب" — new-account registration.
+  static const String register = '/auth/register';
 }
 
 /// Host Shell routing table.
@@ -43,6 +58,18 @@ final class CoreNavigator {
   /// ```
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
+      case CoreRoutes.login:
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => const LoginPage(),
+        );
+
+      case CoreRoutes.register:
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => const RegisterPage(),
+        );
+
       case CoreRoutes.dashboard:
         return MaterialPageRoute<void>(
           settings: settings,
@@ -103,8 +130,7 @@ class HostDashboardPage extends StatelessWidget {
             ? const Center(child: Text('No mini-programs available.'))
             : GridView.builder(
                 padding: const EdgeInsets.all(16),
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
                   mainAxisSpacing: 16,
                   crossAxisSpacing: 16,
@@ -130,7 +156,8 @@ class HostDashboardPage extends StatelessWidget {
 
 /// A single tappable dashboard tile representing one mini-program.
 class _MiniProgramTile extends StatelessWidget {
-  const _MiniProgramTile({super.key, required this.program, required this.onTap});
+  const _MiniProgramTile(
+      {super.key, required this.program, required this.onTap});
 
   final MiniProgram program;
   final VoidCallback onTap;
