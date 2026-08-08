@@ -19,9 +19,34 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from config import get_settings
+
 from .base_model import Base
 
+#: Last-resort fallback, used only if configuration cannot be loaded at
+#: all. The real default lives on `config.Settings.database_url`, which
+#: is what `DATABASE_URL` overrides.
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./mizan_backend.db"
+
+
+def _configured_database_url() -> str:
+    """The database URL from configuration, honouring `DATABASE_URL`.
+
+    Read through `config.Settings` rather than hard-coded here: this
+    module's own docstring tells operators to point `DATABASE_URL` at
+    PostgreSQL for production, and until this looked the setting up,
+    that instruction silently did nothing — a deployment aimed at
+    Postgres would have kept writing to a local SQLite file.
+
+    Layer 5 importing `config` is expected: `config.py` names the
+    storage and data-access layers, alongside the composition root, as
+    its legitimate consumers precisely because they need connection
+    strings.
+    """
+    try:
+        return get_settings().database_url
+    except Exception:  # noqa: BLE001 - never let config break engine creation
+        return DEFAULT_DATABASE_URL
 
 
 def build_engine(database_url: Optional[str] = None) -> AsyncEngine:
@@ -32,7 +57,7 @@ def build_engine(database_url: Optional[str] = None) -> AsyncEngine:
     an in-memory SQLite database per test) without touching the
     process-wide `engine`.
     """
-    url = database_url or DEFAULT_DATABASE_URL
+    url = database_url or _configured_database_url()
     is_sqlite = url.startswith("sqlite")
     connect_args = {"check_same_thread": False} if is_sqlite else {}
     new_engine = create_async_engine(
