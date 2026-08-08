@@ -92,6 +92,15 @@ void main() {
             ),
           );
         }
+        if (settings.name == CoreRoutes.walletDetails) {
+          // Stubbed rather than the real page: this file tests the
+          // dashboard's wiring, while `wallet_details_page_test.dart`
+          // covers the page itself.
+          return MaterialPageRoute<bool>(
+            settings: settings,
+            builder: (_) => const Scaffold(body: Text('OPENED_WALLET_DETAILS')),
+          );
+        }
         return null;
       },
     );
@@ -371,20 +380,20 @@ void main() {
       );
     });
 
-    testWidgets('tapping the wallet half of the fulcrum card shows a notice',
-        (WidgetTester tester) async {
+    testWidgets(
+        'tapping the wallet half of the fulcrum card opens the wallet details '
+        'route', (WidgetTester tester) async {
       await pumpDashboard(tester);
       await tester.pump();
 
-      // Tap the wallet icon rather than the balance text: the balance
-      // now belongs to `WalletBalanceView`, which has its own tap
-      // handler for the error-retry case, so hitting the shared
-      // "قريباً" notice through the half's outer `InkWell` is
-      // unambiguous regardless of which wallet state is showing.
+      // Tap the label rather than the balance text: the balance belongs
+      // to `WalletBalanceView`, which has its own tap handler for the
+      // error-retry case, so going through the half's outer `InkWell`
+      // is unambiguous regardless of which wallet state is showing.
       await tester.tap(find.text('المحفظة الرقمية'));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
-      expect(find.text('المحفظة الرقمية — قريباً.'), findsOneWidget);
+      expect(find.text('OPENED_WALLET_DETAILS'), findsOneWidget);
     });
 
     testWidgets('tapping the chat half of the fulcrum card shows a notice',

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// The Mizan design system's standard form field.
 ///
@@ -28,6 +29,7 @@ class MizanTextField extends StatefulWidget {
     this.textDirection,
     this.autofillHints,
     this.enabled = true,
+    this.inputFormatters,
   });
 
   final TextEditingController controller;
@@ -51,6 +53,11 @@ class MizanTextField extends StatefulWidget {
   final Iterable<String>? autofillHints;
   final bool enabled;
 
+  /// Restricts what can be typed — e.g. digits and a decimal separator
+  /// for a money amount, so an invalid character never reaches the
+  /// validator in the first place.
+  final List<TextInputFormatter>? inputFormatters;
+
   @override
   State<MizanTextField> createState() => _MizanTextFieldState();
 }
@@ -68,6 +75,7 @@ class _MizanTextFieldState extends State<MizanTextField> {
       textInputAction: widget.textInputAction,
       textDirection: widget.textDirection,
       autofillHints: widget.autofillHints,
+      inputFormatters: widget.inputFormatters,
       autovalidateMode: AutovalidateMode.onUserInteraction,
       validator: widget.validator,
       decoration: InputDecoration(

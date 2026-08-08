@@ -50,4 +50,101 @@ class WalletRepository {
       throw NetworkException.fromDioException(error);
     }
   }
+
+  /// Credits [walletId] by [amount] via `POST /wallet/deposit`,
+  /// returning the wallet's new balance as reported by the backend.
+  ///
+  /// Throws [NetworkException] with a transaction-specific Arabic
+  /// message (see [_mapTransactionError]).
+  Future<double> deposit({
+    required String walletId,
+    required double amount,
+  }) async {
+    try {
+      return await _remoteDataSource.deposit(
+        walletId: walletId,
+        amount: amount,
+      );
+    } on DioException catch (error) {
+      throw _mapTransactionError(error);
+    }
+  }
+
+  /// Debits [walletId] by [amount] via `POST /wallet/withdraw`.
+  Future<double> withdraw({
+    required String walletId,
+    required double amount,
+  }) async {
+    try {
+      return await _remoteDataSource.withdraw(
+        walletId: walletId,
+        amount: amount,
+      );
+    } on DioException catch (error) {
+      throw _mapTransactionError(error);
+    }
+  }
+
+  /// Moves [amount] from [sourceWalletId] to [destinationWalletId] via
+  /// `POST /wallet/transfer`, returning the source wallet's new
+  /// balance.
+  ///
+  /// [destinationWalletId] is a **wallet id**, not a user id or email:
+  /// the backend performs no user lookup (see
+  /// `ApiEndpoints.walletTransfer`).
+  Future<double> transfer({
+    required String sourceWalletId,
+    required String destinationWalletId,
+    required double amount,
+  }) async {
+    try {
+      return await _remoteDataSource.transfer(
+        sourceWalletId: sourceWalletId,
+        destinationWalletId: destinationWalletId,
+        amount: amount,
+      );
+    } on DioException catch (error) {
+      throw _mapTransactionError(error);
+    }
+  }
+
+  // -- Error mapping ------------------------------------------------------
+
+  /// Translates the specific status codes
+  /// `WalletController._translate_domain_errors` uses for money
+  /// operations into precise Arabic messages, so the user is told what
+  /// actually went wrong instead of a generic "request failed".
+  ///
+  /// Mapping (mirrors the backend's own):
+  ///
+  ///  * **400** `InsufficientFundsError` -> "الرصيد غير كافٍ"
+  ///  * **422** `InvalidTransactionAmountError` -> invalid amount
+  ///  * **423** `WalletLockedError` -> wallet frozen
+  ///  * **404** `WalletNotFoundError` -> wallet (often the transfer
+  ///    destination) does not exist
+  ///  * **403** ownership violation -> not your wallet
+  ///  * **409** optimistic-lock conflict -> safe to retry
+  ///
+  /// Anything else falls back to
+  /// [NetworkException.fromDioException]'s generic-by-status mapping
+  /// (timeouts, offline, 5xx).
+  NetworkException _mapTransactionError(DioException error) {
+    final NetworkException fallback = NetworkException.fromDioException(error);
+    final String? message = switch (error.response?.statusCode) {
+      400 => 'الرصيد غير كافٍ لإتمام هذه العملية.',
+      403 => 'لا تملك صلاحية التصرف في هذه المحفظة.',
+      404 => 'لم يتم العثور على المحفظة المطلوبة. يرجى التحقق من المعرّف.',
+      409 => 'تم تعديل المحفظة من عملية أخرى. يرجى المحاولة مرة أخرى.',
+      422 => 'المبلغ المدخل غير صالح. يجب أن يكون أكبر من صفر.',
+      423 => 'هذه المحفظة مقفلة مؤقتًا ولا يمكن إجراء عمليات عليها.',
+      _ => null,
+    };
+
+    if (message == null) return fallback;
+    return NetworkException(
+      message,
+      statusCode: fallback.statusCode,
+      technicalDetail: fallback.technicalDetail,
+    );
+  }
 }

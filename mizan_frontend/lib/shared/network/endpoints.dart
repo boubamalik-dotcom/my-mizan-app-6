@@ -34,6 +34,21 @@ class ApiEndpoints {
   /// combined into a single "get, or create on first use" call.
   static const String wallet = '/wallet';
 
+  /// `POST` — credits a wallet. Body: `{wallet_id, amount}`.
+  static const String walletDeposit = '/wallet/deposit';
+
+  /// `POST` — debits a wallet. Body: `{wallet_id, amount}`.
+  static const String walletWithdraw = '/wallet/withdraw';
+
+  /// `POST` — moves funds between two wallets. Body:
+  /// `{source_wallet_id, destination_wallet_id, amount}`.
+  ///
+  /// Note the destination is a **wallet id**, not a user id or email:
+  /// the backend's `TransferRequest`
+  /// (`layer_2_api/schemas/wallet_schemas.py`) has no user-lookup step,
+  /// so the caller must already know the recipient's wallet id.
+  static const String walletTransfer = '/wallet/transfer';
+
   // -- Chat (WebSocket) ---------------------------------------------------
 
   /// [baseUrl] with its scheme swapped for the WebSocket equivalent

@@ -29,6 +29,26 @@ class WalletLoaded extends WalletState {
   final WalletModel wallet;
 }
 
+/// Which money operation is currently in flight — used to label the
+/// in-progress UI rather than showing a generic spinner.
+enum WalletOperation { deposit, withdraw, transfer }
+
+/// A deposit/withdrawal/transfer is in flight.
+///
+/// Deliberately carries the last-known [wallet] so the UI can keep the
+/// current balance on screen (dimmed, with a progress indicator)
+/// instead of blanking it out and making the balance appear to
+/// disappear mid-transaction.
+class WalletOperationInProgress extends WalletState {
+  const WalletOperationInProgress({
+    required this.wallet,
+    required this.operation,
+  });
+
+  final WalletModel wallet;
+  final WalletOperation operation;
+}
+
 /// The fetch/provisioning attempt failed. [message] is already a
 /// ready-to-display Arabic string (see `NetworkException.message`),
 /// never a raw exception.

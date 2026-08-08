@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' show NumberFormat;
 
 import '../../../../shared/design_system/theme/color_scheme.dart';
+import '../../data/wallet_model.dart';
 import '../state/wallet_cubit.dart';
 import '../state/wallet_state.dart';
 
@@ -24,10 +25,15 @@ class WalletBalanceView extends StatelessWidget {
 
   final WalletState state;
 
+  static final NumberFormat _balanceFormat = NumberFormat('#,##0.##');
+
   /// Renders e.g. `15000` as `"15,000"` and `15000.5` as `"15,000.5"`
   /// — grouped thousands, with up to two decimal places only when the
   /// balance actually has a fractional part.
-  static final NumberFormat _balanceFormat = NumberFormat('#,##0.##');
+  ///
+  /// Exposed so `WalletDetailsPage`'s large balance headline formats
+  /// identically to this badge-sized one.
+  static String formatBalance(double balance) => _balanceFormat.format(balance);
 
   @override
   Widget build(BuildContext context) {
@@ -40,17 +46,38 @@ class WalletBalanceView extends StatelessWidget {
             valueColor: AlwaysStoppedAnimation<Color>(MizanColors.gold),
           ),
         ),
-      WalletLoaded(:final wallet) => Text(
-          '${_balanceFormat.format(wallet.balance)} ${wallet.currency}',
-          textDirection: TextDirection.ltr,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-          ),
+      WalletLoaded(:final wallet) => _BalanceText(wallet: wallet),
+      // A transaction in flight keeps the last known balance on screen,
+      // just dimmed: blanking it out mid-transaction would read as the
+      // money having vanished.
+      WalletOperationInProgress(:final wallet) => Opacity(
+          opacity: 0.5,
+          child: _BalanceText(wallet: wallet),
         ),
       WalletError(:final message) => _RetryableError(message: message),
     };
+  }
+}
+
+/// The balance figure itself: grouped thousands plus the wallet's
+/// currency code, pinned left-to-right since a number followed by a
+/// Latin currency code reads incorrectly if bidi-reordered.
+class _BalanceText extends StatelessWidget {
+  const _BalanceText({required this.wallet});
+
+  final WalletModel wallet;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      '${WalletBalanceView.formatBalance(wallet.balance)} ${wallet.currency}',
+      textDirection: TextDirection.ltr,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+      ),
+    );
   }
 }
 

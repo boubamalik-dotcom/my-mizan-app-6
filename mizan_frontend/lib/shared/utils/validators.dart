@@ -57,4 +57,35 @@ class Validators {
   static String? fullName(String? value) {
     return required(value, message: 'الاسم الكامل مطلوب.');
   }
+
+  /// For a money amount: must parse as a number and be strictly
+  /// positive, mirroring the backend's `gt=0` constraint on every
+  /// transaction amount (`wallet_schemas.py`) so an obviously-invalid
+  /// figure is caught before it costs a round trip.
+  static String? amount(String? value) {
+    final String? requiredError = required(value, message: 'المبلغ مطلوب.');
+    if (requiredError != null) return requiredError;
+
+    final double? parsed = parseAmount(value!);
+    if (parsed == null) return 'يرجى إدخال مبلغ رقمي صالح.';
+    if (parsed <= 0) return 'يجب أن يكون المبلغ أكبر من صفر.';
+    return null;
+  }
+
+  /// Parses a user-entered amount, tolerating surrounding whitespace
+  /// and the Arabic decimal separator (`٫`) as well as `.`. Returns
+  /// `null` when the text is not a number at all.
+  static double? parseAmount(String value) {
+    final String normalized = value.trim().replaceAll('٫', '.');
+    if (normalized.isEmpty) return null;
+    return double.tryParse(normalized);
+  }
+
+  /// For the transfer sheet's destination field. The backend expects a
+  /// wallet *id* (see `ApiEndpoints.walletTransfer`), so this only
+  /// checks that something was entered — the id's existence is the
+  /// server's call, surfaced as a **404**.
+  static String? walletId(String? value) {
+    return required(value, message: 'معرّف المحفظة مطلوب.');
+  }
 }

@@ -83,130 +83,155 @@ class HostDashboardPage extends StatelessWidget {
           create: (_) => (_chatCubitOverride ?? ChatCubit())..initializeChat(),
         ),
       ],
-      child: Scaffold(
-        backgroundColor: MizanColors.background,
-        body: Stack(
-          children: <Widget>[
-            const _HeaderBackdrop(),
-            CustomScrollView(
-              slivers: <Widget>[
-                const SliverAppBar(
-                  backgroundColor: Colors.transparent,
-                  elevation: 0,
-                  automaticallyImplyLeading: false,
-                  expandedHeight: 96,
-                  flexibleSpace: FlexibleSpaceBar(
-                    titlePadding: EdgeInsetsDirectional.only(
-                      start: AppSpacing.lg,
-                      bottom: AppSpacing.md,
-                    ),
-                    centerTitle: false,
-                    title: Text(
-                      'مرحباً بك في منصة الميزان',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
+      // `Builder` so everything below — including the tap callbacks
+      // that `context.read<WalletCubit>()` — gets a context *beneath*
+      // the providers. Using this method's own `context` there would
+      // look up from above them and throw `ProviderNotFoundException`.
+      child: Builder(
+        builder: (BuildContext context) => Scaffold(
+          backgroundColor: MizanColors.background,
+          body: Stack(
+            children: <Widget>[
+              const _HeaderBackdrop(),
+              CustomScrollView(
+                slivers: <Widget>[
+                  const SliverAppBar(
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    automaticallyImplyLeading: false,
+                    expandedHeight: 96,
+                    flexibleSpace: FlexibleSpaceBar(
+                      titlePadding: EdgeInsetsDirectional.only(
+                        start: AppSpacing.lg,
+                        bottom: AppSpacing.md,
+                      ),
+                      centerTitle: false,
+                      title: Text(
+                        'مرحباً بك في منصة الميزان',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    0,
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                  ),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate(<Widget>[
-                      FulcrumCard(
-                        walletBalanceContent:
-                            BlocBuilder<WalletCubit, WalletState>(
-                          builder: (BuildContext context, WalletState state) =>
-                              WalletBalanceView(state: state),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      0,
+                      AppSpacing.lg,
+                      AppSpacing.xl,
+                    ),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate(<Widget>[
+                        FulcrumCard(
+                          walletBalanceContent:
+                              BlocBuilder<WalletCubit, WalletState>(
+                            builder:
+                                (BuildContext context, WalletState state) =>
+                                    WalletBalanceView(state: state),
+                          ),
+                          chatBadge: BlocBuilder<ChatCubit, ChatState>(
+                            builder: (BuildContext context, ChatState state) =>
+                                ChatUnreadBadge(state: state),
+                          ),
+                          chatStatusContent: BlocBuilder<ChatCubit, ChatState>(
+                            builder: (BuildContext context, ChatState state) =>
+                                ChatStatusText(state: state),
+                          ),
+                          onWalletTap: () => _openWalletDetails(context),
+                          onChatTap: () =>
+                              _showComingSoon(context, 'الدردشة الآمنة'),
                         ),
-                        chatBadge: BlocBuilder<ChatCubit, ChatState>(
-                          builder: (BuildContext context, ChatState state) =>
-                              ChatUnreadBadge(state: state),
-                        ),
-                        chatStatusContent: BlocBuilder<ChatCubit, ChatState>(
-                          builder: (BuildContext context, ChatState state) =>
-                              ChatStatusText(state: state),
-                        ),
-                        onWalletTap: () =>
-                            _showComingSoon(context, 'المحفظة الرقمية'),
-                        onChatTap: () =>
-                            _showComingSoon(context, 'الدردشة الآمنة'),
-                      ),
-                      const SizedBox(height: AppSpacing.xl),
+                        const SizedBox(height: AppSpacing.xl),
 
-                      // -- Scale 1 (B2C) ------------------------------
-                      const DashboardSectionHeader(
-                        title: 'خدمات الأفراد والصحة',
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      MiniProgramShowcaseCard.wide(
-                        title: 'Mizan Door',
-                        subtitle: 'طابور العيادات',
-                        icon: _registry.getById('mizan_door').icon,
-                        onTap: () => _openMiniProgram(context, 'mizan_door'),
-                      ),
-                      const SizedBox(height: AppSpacing.xl),
+                        // -- Scale 1 (B2C) ------------------------------
+                        const DashboardSectionHeader(
+                          title: 'خدمات الأفراد والصحة',
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        MiniProgramShowcaseCard.wide(
+                          title: 'Mizan Door',
+                          subtitle: 'طابور العيادات',
+                          icon: _registry.getById('mizan_door').icon,
+                          onTap: () => _openMiniProgram(context, 'mizan_door'),
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
 
-                      // -- Scale 2 (B2B) ------------------------------
-                      const DashboardSectionHeader(title: 'الأعمال والأصول'),
-                      const SizedBox(height: AppSpacing.md),
-                      // `IntrinsicHeight` bounds the row's height to
-                      // its tallest child's natural size *before*
-                      // `CrossAxisAlignment.stretch` tries to match
-                      // both cards to it — without it, the row
-                      // (sitting inside a height-unconstrained sliver
-                      // list item) would hand its children an invalid
-                      // infinite-height constraint while attempting to
-                      // stretch them.
-                      IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            Expanded(
-                              child: MiniProgramShowcaseCard.compact(
-                                title: 'Tawazun Freight AI',
-                                subtitle: 'الشحن والخدمات اللوجستية',
-                                icon: _registry
-                                    .getById('tawazun_freight_ai')
-                                    .icon,
-                                onTap: () => _openMiniProgram(
-                                  context,
-                                  'tawazun_freight_ai',
+                        // -- Scale 2 (B2B) ------------------------------
+                        const DashboardSectionHeader(title: 'الأعمال والأصول'),
+                        const SizedBox(height: AppSpacing.md),
+                        // `IntrinsicHeight` bounds the row's height to
+                        // its tallest child's natural size *before*
+                        // `CrossAxisAlignment.stretch` tries to match
+                        // both cards to it — without it, the row
+                        // (sitting inside a height-unconstrained sliver
+                        // list item) would hand its children an invalid
+                        // infinite-height constraint while attempting to
+                        // stretch them.
+                        IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              Expanded(
+                                child: MiniProgramShowcaseCard.compact(
+                                  title: 'Tawazun Freight AI',
+                                  subtitle: 'الشحن والخدمات اللوجستية',
+                                  icon: _registry
+                                      .getById('tawazun_freight_ai')
+                                      .icon,
+                                  onTap: () => _openMiniProgram(
+                                    context,
+                                    'tawazun_freight_ai',
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(
-                              child: MiniProgramShowcaseCard.compact(
-                                title: 'Oran Real Estate',
-                                subtitle: 'العقارات والاستثمار',
-                                icon:
-                                    _registry.getById('oran_real_estate').icon,
-                                onTap: () => _openMiniProgram(
-                                  context,
-                                  'oran_real_estate',
+                              const SizedBox(width: AppSpacing.md),
+                              Expanded(
+                                child: MiniProgramShowcaseCard.compact(
+                                  title: 'Oran Real Estate',
+                                  subtitle: 'العقارات والاستثمار',
+                                  icon: _registry
+                                      .getById('oran_real_estate')
+                                      .icon,
+                                  onTap: () => _openMiniProgram(
+                                    context,
+                                    'oran_real_estate',
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ]),
+                      ]),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  /// Opens the full Wallet screen and, if a deposit/withdrawal/transfer
+  /// happened while it was open, re-reads the balance into *this*
+  /// page's cubit — `WalletDetailsPage` runs its own cubit, so the
+  /// dashboard would otherwise come back showing a stale figure.
+  Future<void> _openWalletDetails(BuildContext context) async {
+    final WalletCubit cubit = context.read<WalletCubit>();
+    final bool? balanceChanged = await Navigator.of(context).pushNamed<bool>(
+      CoreRoutes.walletDetails,
+    );
+    // `null` means the page was popped by the system back gesture,
+    // which cannot carry a result — refresh rather than risk leaving a
+    // stale balance on screen. An explicit `false` (the app-bar arrow
+    // after no transactions) is the only case that skips the request.
+    if (balanceChanged ?? true) {
+      await cubit.loadWalletData();
+    }
   }
 
   void _openMiniProgram(BuildContext context, String miniProgramId) {

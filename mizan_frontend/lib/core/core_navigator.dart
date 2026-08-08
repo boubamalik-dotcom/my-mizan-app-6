@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/register_page.dart';
 import '../features/dashboard/presentation/pages/dashboard_page.dart';
+import '../features/wallet/presentation/pages/wallet_details_page.dart';
 import '../shared/network/interceptors.dart' show kLoginRouteName;
 import 'mini_program_loader/mini_program_base.dart';
 import 'mini_program_loader/mini_program_loader.dart';
@@ -33,6 +34,11 @@ final class CoreRoutes {
 
   /// "إنشاء حساب" — new-account registration.
   static const String register = '/auth/register';
+
+  /// "المحفظة الرقمية" — the full Wallet screen (balance plus deposit,
+  /// withdraw, and transfer actions). Pops `true` when the balance
+  /// changed while it was open, so the dashboard can refresh.
+  static const String walletDetails = '/wallet';
 }
 
 /// Host Shell routing table.
@@ -74,6 +80,14 @@ final class CoreNavigator {
         return MaterialPageRoute<void>(
           settings: settings,
           builder: (_) => HostDashboardPage(),
+        );
+
+      // Typed `bool` (unlike the `void` routes around it): the page
+      // reports back whether the balance changed while it was open.
+      case CoreRoutes.walletDetails:
+        return MaterialPageRoute<bool>(
+          settings: settings,
+          builder: (_) => const WalletDetailsPage(),
         );
 
       case CoreRoutes.miniProgram:
