@@ -3,6 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mizan_frontend/core/core_navigator.dart';
 import 'package:mizan_frontend/core/mini_program_loader/mini_program_base.dart';
 import 'package:mizan_frontend/core/mini_program_loader/mini_program_loader.dart';
+import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
+import 'package:mizan_frontend/features/wallet/data/wallet_model.dart';
+import 'package:mizan_frontend/features/wallet/presentation/state/wallet_cubit.dart';
+import 'package:mizan_frontend/features/wallet/presentation/state/wallet_state.dart';
 
 /// Forbidden terms per the strict Mizan Door scope rule: the mini-program
 /// must never surface QR-code scanning or payment-related UI.
@@ -13,10 +17,36 @@ const List<String> _forbiddenMizanDoorTerms = <String>[
   'pay ',
 ];
 
+/// A [WalletCubit] that never touches the network: it emits a fixed
+/// [WalletLoaded] state instead of running [WalletCubit.loadWalletData]'s
+/// real repository call. These tests are about routing, not the Wallet
+/// feature itself (see `dashboard_page_test.dart` and
+/// `wallet_cubit_test.dart` for that) — without this stub, the
+/// dashboard's default `WalletCubit()` would fire a real HTTP request
+/// against `ApiEndpoints.baseUrl`'s unroutable test-time address and
+/// leave a pending `Timer` once the test tears down before it resolves.
+class _StubWalletCubit extends WalletCubit {
+  @override
+  Future<void> loadWalletData() async {
+    emit(
+      const WalletLoaded(
+        WalletModel(
+          walletId: 'test-wallet',
+          userId: 'test-user',
+          balance: 0,
+          currency: 'DZD',
+          isLocked: false,
+          version: 1,
+        ),
+      ),
+    );
+  }
+}
+
 void main() {
   Widget buildTestApp() {
-    return const MaterialApp(
-      initialRoute: CoreRoutes.dashboard,
+    return MaterialApp(
+      home: HostDashboardPage(walletCubit: _StubWalletCubit()),
       onGenerateRoute: CoreNavigator.onGenerateRoute,
     );
   }

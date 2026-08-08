@@ -15,23 +15,29 @@ import '../../../../shared/design_system/theme/color_scheme.dart';
 ///
 ///  * **Right half** (first child — under the app's RTL ambient
 ///    [Directionality], a [Row]'s first child lands on the right):
-///    "المحفظة الرقمية" (Digital Wallet), showing [walletBalance].
+///    "المحفظة الرقمية" (Digital Wallet), showing [walletBalanceContent].
 ///  * **Left half**: "الدردشة الآمنة" (Secure Chat), showing an
 ///    unread-message badge when [unreadMessageCount] is positive.
 class FulcrumCard extends StatelessWidget {
   const FulcrumCard({
     super.key,
-    required this.walletBalance,
+    required this.walletBalanceContent,
     this.unreadMessageCount = 0,
     this.onWalletTap,
     this.onChatTap,
   });
 
-  /// Pre-formatted balance text (e.g. `"2,450.00 ر.س"`). Formatting is
-  /// the caller's responsibility — this widget only lays it out — so
-  /// it stays decoupled from wherever the real Wallet balance
-  /// eventually comes from.
-  final String walletBalance;
+  /// The wallet half's balance figure — deliberately just this one
+  /// small widget, not the whole card or even the whole wallet half.
+  /// The caller (`HostDashboardPage`) wraps only this in a
+  /// `BlocBuilder<WalletCubit, WalletState>` (via `WalletBalanceView`),
+  /// so a Wallet state change (loading, loaded, error) repaints
+  /// nothing else on the card — not the "الرصيد الحالي" caption above
+  /// it, the wallet icon, the divider, or the Chat half beside it.
+  /// [FulcrumCard] itself stays entirely unaware of `WalletCubit` or
+  /// any other state-management choice — it only ever lays out
+  /// whatever [Widget] it is handed.
+  final Widget walletBalanceContent;
 
   /// Number of unread chat messages; the badge is hidden entirely
   /// when this is `0`.
@@ -59,7 +65,22 @@ class FulcrumCard extends StatelessWidget {
               ),
             ],
           ),
-          child: IntrinsicHeight(
+          child: SizedBox(
+            // A concrete, generously-sized height rather than
+            // `IntrinsicHeight`: `IntrinsicHeight` derives this from a
+            // *separate, estimated* intrinsic-height layout pass over
+            // each half's `Text` content, which can disagree by a
+            // sub-pixel from that same content's *actual* layout
+            // height once real (non-test) fonts are involved — a
+            // well-known Flutter rounding gap that renders as a
+            // spurious "RenderFlex overflowed" warning. A fixed height
+            // sidesteps the mismatch entirely; `_FulcrumHalf`'s
+            // `FittedBox` (below) is the second, independent
+            // safeguard, gracefully shrinking content instead of
+            // overflowing in the (now purely theoretical) case content
+            // still doesn't fit, e.g. under extreme accessibility text
+            // scaling.
+            height: 180,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
@@ -76,15 +97,7 @@ class FulcrumCard extends StatelessWidget {
                           style: TextStyle(color: Colors.white70, fontSize: 12),
                         ),
                         const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          walletBalance,
-                          textDirection: TextDirection.ltr,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+                        walletBalanceContent,
                       ],
                     ),
                   ),
@@ -134,39 +147,37 @@ class _FulcrumHalf extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          // A few extra pixels of bottom padding beyond the symmetric
-          // `AppSpacing.md` used everywhere else: `IntrinsicHeight`
-          // (in `FulcrumCard.build`) sizes this row from an *estimated*
-          // intrinsic height of each half's `Text` content, which can
-          // land a hair short of that same content's *actual* layout
-          // height once real fonts are involved — a well-known,
-          // effectively-invisible sub-pixel rounding gap between
-          // Flutter's intrinsic-height and normal layout passes. This
-          // margin absorbs that gap so it never renders as an overflow
-          // warning.
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.sm,
-            AppSpacing.md,
-            AppSpacing.sm,
-            AppSpacing.md + 6,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.md,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              _BadgedIcon(icon: icon, badgeCount: badgeCount),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
+          // `FittedBox` is what actually makes the fixed height above
+          // safe: it measures this `Column` at its natural size and
+          // only ever scales it *down* (`BoxFit.scaleDown` never
+          // enlarges) if it doesn't fit — imperceptibly, in the
+          // ordinary case — instead of ever overflowing, regardless of
+          // font-metric variance or a user's accessibility text-scale
+          // setting.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                _BadgedIcon(icon: icon, badgeCount: badgeCount),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              child,
-            ],
+                const SizedBox(height: AppSpacing.xs),
+                child,
+              ],
+            ),
           ),
         ),
       ),

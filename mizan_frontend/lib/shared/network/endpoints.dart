@@ -25,4 +25,12 @@ class ApiEndpoints {
   static const String register = '/auth/register';
   static const String login = '/auth/login';
   static const String me = '/auth/me';
+
+  // -- Wallet -------------------------------------------------------------
+
+  /// `GET` fetches the authenticated caller's own wallet (**404** if
+  /// they have not provisioned one yet); `POST` provisions a new one.
+  /// See `WalletRepository.getOrCreateWallet` for how the two are
+  /// combined into a single "get, or create on first use" call.
+  static const String wallet = '/wallet';
 }

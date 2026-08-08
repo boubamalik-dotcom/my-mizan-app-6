@@ -1,8 +1,43 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mizan_frontend/core/core_navigator.dart';
 import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
+import 'package:mizan_frontend/features/wallet/data/wallet_model.dart';
+import 'package:mizan_frontend/features/wallet/data/wallet_repository.dart';
+import 'package:mizan_frontend/features/wallet/presentation/state/wallet_cubit.dart';
+import 'package:mizan_frontend/features/wallet/presentation/state/wallet_state.dart';
+import 'package:mizan_frontend/shared/exceptions/network_exception.dart';
+import 'package:mocktail/mocktail.dart';
+
+class MockWalletRepository extends Mock implements WalletRepository {}
+
+const WalletModel _testWallet = WalletModel(
+  walletId: 'wallet-1',
+  userId: 'user-1',
+  balance: 15000,
+  currency: 'DZD',
+  isLocked: false,
+  version: 1,
+);
+
+/// A [WalletCubit] that never touches the network — it emits a fixed
+/// [WalletLoaded] state instead of running [WalletCubit.loadWalletData]'s
+/// real repository call. Used by every test in this file *except* the
+/// "Wallet states" group (which specifically exercises real
+/// `WalletCubit` behavior against a mocked [WalletRepository]) — the
+/// dashboard's default `WalletCubit()` would otherwise fire a real
+/// HTTP request against `ApiEndpoints.baseUrl`'s unroutable test-time
+/// address and leave a pending `Timer` once the test tears down
+/// before it resolves.
+class _StubWalletCubit extends WalletCubit {
+  @override
+  Future<void> loadWalletData() async {
+    emit(const WalletLoaded(_testWallet));
+  }
+}
 
 void main() {
   /// Wraps [HostDashboardPage] in a minimal `MaterialApp` configured
@@ -17,7 +52,7 @@ void main() {
   /// verify *which* mini-program a card navigates to without pulling
   /// in the real [MiniProgramLoader]/placeholder pages (already
   /// covered by `core_navigator_test.dart`).
-  Widget buildTestApp() {
+  Widget buildTestApp({WalletCubit? walletCubit}) {
     return MaterialApp(
       locale: const Locale('ar'),
       supportedLocales: const <Locale>[Locale('ar')],
@@ -26,7 +61,7 @@ void main() {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: HostDashboardPage(),
+      home: HostDashboardPage(walletCubit: walletCubit ?? _StubWalletCubit()),
       onGenerateRoute: (RouteSettings settings) {
         if (settings.name == CoreRoutes.miniProgram) {
           return MaterialPageRoute<void>(
@@ -44,18 +79,22 @@ void main() {
   /// A tall enough surface that every dashboard section is laid out
   /// on-screen and tappable, mirroring `core_navigator_test.dart`'s
   /// `pumpDashboard` helper.
-  Future<void> pumpDashboard(WidgetTester tester) async {
+  Future<void> pumpDashboard(
+    WidgetTester tester, {
+    WalletCubit? walletCubit,
+  }) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(buildTestApp());
+    await tester.pumpWidget(buildTestApp(walletCubit: walletCubit));
   }
 
   group('layout & content', () {
     testWidgets('renders the greeting, fulcrum card, and both section headers',
         (WidgetTester tester) async {
       await pumpDashboard(tester);
+      await tester.pump();
 
       expect(find.text('مرحباً بك في منصة الميزان'), findsOneWidget);
       expect(find.text('المحفظة الرقمية'), findsOneWidget);
@@ -64,11 +103,12 @@ void main() {
       expect(find.text('الأعمال والأصول'), findsOneWidget);
     });
 
-    testWidgets('renders a placeholder wallet balance and an unread chat badge',
+    testWidgets('renders the loaded wallet balance and an unread chat badge',
         (WidgetTester tester) async {
       await pumpDashboard(tester);
+      await tester.pumpAndSettle();
 
-      expect(find.text('2,450.00 ر.س'), findsOneWidget);
+      expect(find.text('15,000 DZD'), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
     });
 
@@ -101,6 +141,83 @@ void main() {
       // ambient Directionality is RTL, which places a Row's *first*
       // child (Wallet) at the reading-direction start (the right edge).
       expect(walletX, greaterThan(chatX));
+    });
+  });
+
+  group('wallet states', () {
+    late MockWalletRepository repository;
+
+    setUpAll(() {
+      registerFallbackValue(_testWallet);
+    });
+
+    setUp(() {
+      repository = MockWalletRepository();
+    });
+
+    testWidgets('shows a gold loading spinner while the wallet is loading',
+        (WidgetTester tester) async {
+      final Completer<WalletModel> completer = Completer<WalletModel>();
+      when(() => repository.getOrCreateWallet())
+          .thenAnswer((_) => completer.future);
+
+      await pumpDashboard(
+        tester,
+        walletCubit: WalletCubit(repository: repository),
+      );
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      final CircularProgressIndicator indicator = tester.widget(
+        find.byType(CircularProgressIndicator),
+      );
+      expect(
+        (indicator.valueColor as AlwaysStoppedAnimation<Color>).value,
+        const Color(0xFFD4A017),
+      );
+
+      // Avoid leaving the completer's future permanently unresolved.
+      completer.complete(_testWallet);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'shows the balance formatted with intl.NumberFormat once loaded',
+        (WidgetTester tester) async {
+      when(() => repository.getOrCreateWallet())
+          .thenAnswer((_) async => _testWallet);
+
+      await pumpDashboard(
+        tester,
+        walletCubit: WalletCubit(repository: repository),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('15,000 DZD'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('shows a concise retry notice on error, and tapping it retries',
+        (WidgetTester tester) async {
+      when(() => repository.getOrCreateWallet())
+          .thenThrow(const NetworkException('تعذّر الاتصال بالخادم.'));
+
+      await pumpDashboard(
+        tester,
+        walletCubit: WalletCubit(repository: repository),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('خطأ في التحديث'), findsOneWidget);
+      verify(() => repository.getOrCreateWallet()).called(1);
+
+      when(() => repository.getOrCreateWallet())
+          .thenAnswer((_) async => _testWallet);
+      await tester.tap(find.text('خطأ في التحديث'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('15,000 DZD'), findsOneWidget);
+      verify(() => repository.getOrCreateWallet()).called(1);
     });
   });
 
@@ -144,7 +261,13 @@ void main() {
     testWidgets('tapping the wallet half of the fulcrum card shows a notice',
         (WidgetTester tester) async {
       await pumpDashboard(tester);
+      await tester.pump();
 
+      // Tap the wallet icon rather than the balance text: the balance
+      // now belongs to `WalletBalanceView`, which has its own tap
+      // handler for the error-retry case, so hitting the shared
+      // "قريباً" notice through the half's outer `InkWell` is
+      // unambiguous regardless of which wallet state is showing.
       await tester.tap(find.text('المحفظة الرقمية'));
       await tester.pump();
 
