@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mizan_frontend/core/core_navigator.dart';
 import 'package:mizan_frontend/core/mini_program_loader/mini_program_base.dart';
 import 'package:mizan_frontend/core/mini_program_loader/mini_program_loader.dart';
+import 'package:mizan_frontend/features/chat/presentation/state/chat_cubit.dart';
+import 'package:mizan_frontend/features/chat/presentation/state/chat_state.dart';
 import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
 import 'package:mizan_frontend/features/wallet/data/wallet_model.dart';
 import 'package:mizan_frontend/features/wallet/presentation/state/wallet_cubit.dart';
@@ -43,10 +45,24 @@ class _StubWalletCubit extends WalletCubit {
   }
 }
 
+/// The chat counterpart of [_StubWalletCubit]: emits a fixed
+/// [ChatConnected] state instead of opening a real WebSocket (which
+/// would hang against `ApiEndpoints`' unroutable test-time host and
+/// leave a pending connection once the test tears down).
+class _StubChatCubit extends ChatCubit {
+  @override
+  Future<void> initializeChat() async {
+    emit(const ChatConnected(unreadCount: 3));
+  }
+}
+
 void main() {
   Widget buildTestApp() {
     return MaterialApp(
-      home: HostDashboardPage(walletCubit: _StubWalletCubit()),
+      home: HostDashboardPage(
+        walletCubit: _StubWalletCubit(),
+        chatCubit: _StubChatCubit(),
+      ),
       onGenerateRoute: CoreNavigator.onGenerateRoute,
     );
   }

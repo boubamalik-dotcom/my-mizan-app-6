@@ -5,6 +5,10 @@ import '../../../../core/core_navigator.dart';
 import '../../../../core/mini_program_loader/mini_program_registry.dart';
 import '../../../../shared/design_system/constants/app_constants.dart';
 import '../../../../shared/design_system/theme/color_scheme.dart';
+import '../../../chat/presentation/state/chat_cubit.dart';
+import '../../../chat/presentation/state/chat_state.dart';
+import '../../../chat/presentation/widgets/chat_status_text.dart';
+import '../../../chat/presentation/widgets/chat_unread_badge.dart';
 import '../../../wallet/presentation/state/wallet_cubit.dart';
 import '../../../wallet/presentation/state/wallet_state.dart';
 import '../../../wallet/presentation/widgets/wallet_balance_view.dart';
@@ -36,8 +40,10 @@ class HostDashboardPage extends StatelessWidget {
     super.key,
     MiniProgramRegistry? registry,
     WalletCubit? walletCubit,
+    ChatCubit? chatCubit,
   })  : _registry = registry ?? MiniProgramRegistry.instance,
-        _walletCubitOverride = walletCubit;
+        _walletCubitOverride = walletCubit,
+        _chatCubitOverride = chatCubit;
 
   final MiniProgramRegistry _registry;
 
@@ -51,20 +57,32 @@ class HostDashboardPage extends StatelessWidget {
   /// `initState`.
   final WalletCubit? _walletCubitOverride;
 
-  // Placeholder content until the real Chat feature (still under
-  // construction in `core/chat`) is wired up, mirroring how the
-  // Wallet half looked before it was connected to the backend.
-  static const int _placeholderUnreadMessageCount = 3;
+  /// The Chat counterpart of [_walletCubitOverride]: injectable for
+  /// tests (which must never open a real WebSocket), and otherwise a
+  /// fresh [ChatCubit] told to [ChatCubit.initializeChat] in [build],
+  /// right alongside the wallet's load.
+  final ChatCubit? _chatCubitOverride;
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider<WalletCubit>(
-      // `loadWalletData()` always runs here — whether this is a fresh
-      // production `WalletCubit()` or a test-injected override — so
-      // "load the wallet on entering the dashboard" holds regardless
-      // of which cubit instance is in play, and callers/tests never
-      // need to remember to trigger it themselves.
-      create: (_) => (_walletCubitOverride ?? WalletCubit())..loadWalletData(),
+    return MultiBlocProvider(
+      // Both features kick off their own load the moment the dashboard
+      // is built — whether these are fresh production cubits or
+      // test-injected overrides — so "load on entering the dashboard"
+      // holds regardless of which instances are in play, and
+      // callers/tests never need to remember to trigger them.
+      // `BlocProvider` also closes both when this page is disposed,
+      // which is what tears the chat WebSocket down on logout (see
+      // `ChatCubit.close`).
+      providers: [
+        BlocProvider<WalletCubit>(
+          create: (_) =>
+              (_walletCubitOverride ?? WalletCubit())..loadWalletData(),
+        ),
+        BlocProvider<ChatCubit>(
+          create: (_) => (_chatCubitOverride ?? ChatCubit())..initializeChat(),
+        ),
+      ],
       child: Scaffold(
         backgroundColor: MizanColors.background,
         body: Stack(
@@ -108,7 +126,14 @@ class HostDashboardPage extends StatelessWidget {
                           builder: (BuildContext context, WalletState state) =>
                               WalletBalanceView(state: state),
                         ),
-                        unreadMessageCount: _placeholderUnreadMessageCount,
+                        chatBadge: BlocBuilder<ChatCubit, ChatState>(
+                          builder: (BuildContext context, ChatState state) =>
+                              ChatUnreadBadge(state: state),
+                        ),
+                        chatStatusContent: BlocBuilder<ChatCubit, ChatState>(
+                          builder: (BuildContext context, ChatState state) =>
+                              ChatStatusText(state: state),
+                        ),
                         onWalletTap: () =>
                             _showComingSoon(context, 'المحفظة الرقمية'),
                         onChatTap: () =>

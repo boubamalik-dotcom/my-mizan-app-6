@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mizan_frontend/core/core_navigator.dart';
+import 'package:mizan_frontend/features/chat/presentation/state/chat_cubit.dart';
+import 'package:mizan_frontend/features/chat/presentation/state/chat_state.dart';
 import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
 import 'package:mizan_frontend/features/wallet/data/wallet_model.dart';
 import 'package:mizan_frontend/features/wallet/data/wallet_repository.dart';
@@ -39,6 +41,21 @@ class _StubWalletCubit extends WalletCubit {
   }
 }
 
+/// A [ChatCubit] that emits a fixed state instead of opening a real
+/// WebSocket, for the same reason [_StubWalletCubit] avoids real HTTP:
+/// a live socket against `ApiEndpoints`' unroutable test-time host
+/// would hang and outlive the test.
+class _StubChatCubit extends ChatCubit {
+  _StubChatCubit(this._state);
+
+  final ChatState _state;
+
+  @override
+  Future<void> initializeChat() async {
+    emit(_state);
+  }
+}
+
 void main() {
   /// Wraps [HostDashboardPage] in a minimal `MaterialApp` configured
   /// the same way `main.dart` configures the real app — Arabic
@@ -52,7 +69,7 @@ void main() {
   /// verify *which* mini-program a card navigates to without pulling
   /// in the real [MiniProgramLoader]/placeholder pages (already
   /// covered by `core_navigator_test.dart`).
-  Widget buildTestApp({WalletCubit? walletCubit}) {
+  Widget buildTestApp({WalletCubit? walletCubit, ChatCubit? chatCubit}) {
     return MaterialApp(
       locale: const Locale('ar'),
       supportedLocales: const <Locale>[Locale('ar')],
@@ -61,7 +78,11 @@ void main() {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: HostDashboardPage(walletCubit: walletCubit ?? _StubWalletCubit()),
+      home: HostDashboardPage(
+        walletCubit: walletCubit ?? _StubWalletCubit(),
+        chatCubit:
+            chatCubit ?? _StubChatCubit(const ChatConnected(unreadCount: 3)),
+      ),
       onGenerateRoute: (RouteSettings settings) {
         if (settings.name == CoreRoutes.miniProgram) {
           return MaterialPageRoute<void>(
@@ -82,12 +103,15 @@ void main() {
   Future<void> pumpDashboard(
     WidgetTester tester, {
     WalletCubit? walletCubit,
+    ChatCubit? chatCubit,
   }) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(buildTestApp(walletCubit: walletCubit));
+    await tester.pumpWidget(
+      buildTestApp(walletCubit: walletCubit, chatCubit: chatCubit),
+    );
   }
 
   group('layout & content', () {
@@ -218,6 +242,95 @@ void main() {
 
       expect(find.text('15,000 DZD'), findsOneWidget);
       verify(() => repository.getOrCreateWallet()).called(1);
+    });
+  });
+
+  group('chat states', () {
+    testWidgets('connecting shows a miniature progress indicator, no badge',
+        (WidgetTester tester) async {
+      await pumpDashboard(
+        tester,
+        chatCubit: _StubChatCubit(const ChatConnecting()),
+      );
+      await tester.pump();
+
+      expect(find.text('جارٍ الاتصال…'), findsOneWidget);
+      // Two spinners would mean the wallet is still loading too; the
+      // stub wallet cubit resolves immediately, so this one is chat's.
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('3'), findsNothing);
+    });
+
+    testWidgets('connected with unread messages shows a gold count badge',
+        (WidgetTester tester) async {
+      await pumpDashboard(
+        tester,
+        chatCubit: _StubChatCubit(const ChatConnected(unreadCount: 4)),
+      );
+      await tester.pump();
+
+      expect(find.text('4'), findsOneWidget);
+      expect(find.text('لديك رسائل غير مقروءة'), findsOneWidget);
+
+      final Container badge = tester.widget<Container>(
+        find
+            .ancestor(
+              of: find.text('4'),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      final BoxDecoration decoration = badge.decoration! as BoxDecoration;
+      expect(decoration.color, const Color(0xFFD4A017));
+    });
+
+    testWidgets('connected with nothing unread shows no badge at all',
+        (WidgetTester tester) async {
+      await pumpDashboard(
+        tester,
+        chatCubit: _StubChatCubit(const ChatConnected()),
+      );
+      await tester.pump();
+
+      expect(find.text('محادثات مشفّرة بالكامل'), findsOneWidget);
+      expect(find.text('0'), findsNothing);
+      expect(find.byIcon(Icons.cloud_off_rounded), findsNothing);
+    });
+
+    testWidgets('a capped badge is shown for more than nine unread messages',
+        (WidgetTester tester) async {
+      await pumpDashboard(
+        tester,
+        chatCubit: _StubChatCubit(const ChatConnected(unreadCount: 42)),
+      );
+      await tester.pump();
+
+      expect(find.text('9+'), findsOneWidget);
+      expect(find.text('42'), findsNothing);
+    });
+
+    testWidgets('disconnected shows the offline marker',
+        (WidgetTester tester) async {
+      await pumpDashboard(
+        tester,
+        chatCubit: _StubChatCubit(const ChatDisconnected()),
+      );
+      await tester.pump();
+
+      expect(find.byIcon(Icons.cloud_off_rounded), findsOneWidget);
+      expect(find.text('غير متصل حاليًا'), findsOneWidget);
+    });
+
+    testWidgets('an error also shows the offline marker with its own label',
+        (WidgetTester tester) async {
+      await pumpDashboard(
+        tester,
+        chatCubit: _StubChatCubit(const ChatError('تعذّر الاتصال بالخادم.')),
+      );
+      await tester.pump();
+
+      expect(find.byIcon(Icons.cloud_off_rounded), findsOneWidget);
+      expect(find.text('تعذّر الاتصال'), findsOneWidget);
     });
   });
 

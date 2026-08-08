@@ -16,13 +16,18 @@ import '../../../../shared/design_system/theme/color_scheme.dart';
 ///  * **Right half** (first child — under the app's RTL ambient
 ///    [Directionality], a [Row]'s first child lands on the right):
 ///    "المحفظة الرقمية" (Digital Wallet), showing [walletBalanceContent].
-///  * **Left half**: "الدردشة الآمنة" (Secure Chat), showing an
-///    unread-message badge when [unreadMessageCount] is positive.
+///  * **Left half**: "الدردشة الآمنة" (Secure Chat), showing
+///    [chatStatusContent] and, overlaid on its icon, [chatBadge].
+///
+/// Every live value on the card is injected as a [Widget] rather than
+/// as data: this keeps [FulcrumCard] purely presentational and unaware
+/// of `WalletCubit`, `ChatCubit`, or any other state-management choice.
 class FulcrumCard extends StatelessWidget {
   const FulcrumCard({
     super.key,
     required this.walletBalanceContent,
-    this.unreadMessageCount = 0,
+    required this.chatStatusContent,
+    this.chatBadge,
     this.onWalletTap,
     this.onChatTap,
   });
@@ -39,9 +44,16 @@ class FulcrumCard extends StatelessWidget {
   /// whatever [Widget] it is handed.
   final Widget walletBalanceContent;
 
-  /// Number of unread chat messages; the badge is hidden entirely
-  /// when this is `0`.
-  final int unreadMessageCount;
+  /// The chat half's status line — the live counterpart to
+  /// [walletBalanceContent], wrapped by the caller in its own
+  /// `BlocBuilder` (see `ChatStatusText`).
+  final Widget chatStatusContent;
+
+  /// Small marker overlaid on the chat icon: an unread count, a
+  /// connecting indicator, or an offline marker (see
+  /// `ChatUnreadBadge`). Pass `null` — or a zero-sized widget — for no
+  /// badge at all.
+  final Widget? chatBadge;
 
   final VoidCallback? onWalletTap;
   final VoidCallback? onChatTap;
@@ -108,12 +120,8 @@ class FulcrumCard extends StatelessWidget {
                     icon: Icons.chat_bubble_rounded,
                     label: 'الدردشة الآمنة',
                     onTap: onChatTap,
-                    badgeCount: unreadMessageCount,
-                    child: const Text(
-                      'محادثات مشفّرة بالكامل',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
+                    badge: chatBadge,
+                    child: chatStatusContent,
                   ),
                 ),
               ],
@@ -130,14 +138,14 @@ class _FulcrumHalf extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.child,
-    this.badgeCount = 0,
+    this.badge,
     this.onTap,
   });
 
   final IconData icon;
   final String label;
   final Widget child;
-  final int badgeCount;
+  final Widget? badge;
   final VoidCallback? onTap;
 
   @override
@@ -163,7 +171,7 @@ class _FulcrumHalf extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                _BadgedIcon(icon: icon, badgeCount: badgeCount),
+                _BadgedIcon(icon: icon, badge: badge),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   label,
@@ -186,13 +194,15 @@ class _FulcrumHalf extends StatelessWidget {
 }
 
 class _BadgedIcon extends StatelessWidget {
-  const _BadgedIcon({required this.icon, required this.badgeCount});
+  const _BadgedIcon({required this.icon, this.badge});
 
   final IconData icon;
-  final int badgeCount;
+  final Widget? badge;
 
   @override
   Widget build(BuildContext context) {
+    final Widget? badgeWidget = badge;
+
     return Stack(
       clipBehavior: Clip.none,
       children: <Widget>[
@@ -201,7 +211,7 @@ class _BadgedIcon extends StatelessWidget {
           backgroundColor: MizanColors.gold,
           child: Icon(icon, color: MizanColors.navy, size: 22),
         ),
-        if (badgeCount > 0)
+        if (badgeWidget != null)
           PositionedDirectional(
             top: -4,
             // `PositionedDirectional.end` (rather than plain
@@ -210,26 +220,7 @@ class _BadgedIcon extends StatelessWidget {
             // icon's outer edge correctly under the app's RTL layout
             // instead of flipping to the wrong side.
             end: -4,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              constraints: const BoxConstraints(minWidth: 18),
-              decoration: BoxDecoration(
-                color: MizanColors.error,
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: Colors.white, width: 1.5),
-              ),
-              child: Text(
-                badgeCount > 9 ? '9+' : '$badgeCount',
-                textAlign: TextAlign.center,
-                textDirection: TextDirection.ltr,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  height: 1.3,
-                ),
-              ),
-            ),
+            child: badgeWidget,
           ),
       ],
     );
