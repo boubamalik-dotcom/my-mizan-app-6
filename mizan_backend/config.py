@@ -49,6 +49,32 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
+    # Authorization — role bootstrap
+    #: Emails that receive the `admin` role when they register.
+    #:
+    #: Solves the bootstrap problem: granting a role requires
+    #: `users:manage_roles`, which only an admin holds, so without this
+    #: the very first admin could never exist except by editing the
+    #: database directly. Set it to the compliance owner's address at
+    #: deploy time, e.g.
+    #: `BOOTSTRAP_ADMIN_EMAILS=compliance@mizan.app,cto@mizan.app`.
+    #:
+    #: Empty by default: every account is an ordinary user until
+    #: someone deliberately configures otherwise. Matching is
+    #: case-insensitive, since email local parts are routinely typed
+    #: with inconsistent case.
+    bootstrap_admin_emails: str = ""
+
+    def is_bootstrap_admin(self, email: str) -> bool:
+        """Whether `email` is configured to be granted `admin` on
+        registration."""
+        configured = {
+            candidate.strip().lower()
+            for candidate in self.bootstrap_admin_emails.split(",")
+            if candidate.strip()
+        }
+        return email.strip().lower() in configured
+
 
 @lru_cache
 def get_settings() -> Settings:

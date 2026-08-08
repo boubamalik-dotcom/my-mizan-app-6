@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from ...layer_5_storage.models.transaction_ledger_model import (
+    EntryDirection,
     TransactionLedgerModel,
     TransactionType,
 )
@@ -113,6 +114,10 @@ class LedgerEntryRecord:
     wallet_id: str
     amount: Decimal
     transaction_type: TransactionType
+    #: Whether the entry credited or debited the wallet. `None` only
+    #: for rows written before the column existed, which are append-only
+    #: and so cannot be backfilled.
+    direction: Optional[EntryDirection]
     reference_id: Optional[str]
     counterparty_wallet_id: Optional[str]
     created_at: datetime
@@ -294,6 +299,7 @@ class WalletRepository:
         wallet_id: str,
         amount: Decimal,
         transaction_type: TransactionType,
+        direction: EntryDirection,
         reference_id: Optional[str] = None,
         counterparty_wallet_id: Optional[str] = None,
     ) -> LedgerEntryRecord:
@@ -304,6 +310,10 @@ class WalletRepository:
             wallet_id: The wallet this entry belongs to.
             amount: The transaction's positive magnitude.
             transaction_type: What kind of event this entry records.
+            direction: Whether the entry credited or debited the
+                wallet. Required, not inferred: a transfer's two legs
+                share a type and a positive amount, so without this the
+                ledger could not be replayed into a balance at all.
             reference_id: Optional correlation id — for a transfer,
                 the same `reference_id` should be passed for both the
                 sending and receiving wallet's entries.
@@ -322,6 +332,7 @@ class WalletRepository:
             wallet_id=wallet_id,
             amount=amount,
             transaction_type=transaction_type,
+            direction=direction,
             reference_id=reference_id,
             counterparty_wallet_id=counterparty_wallet_id,
         )
@@ -357,6 +368,7 @@ class WalletRepository:
             wallet_id=entry.wallet_id,
             amount=entry.amount,
             transaction_type=entry.transaction_type,
+            direction=entry.direction,
             reference_id=entry.reference_id,
             counterparty_wallet_id=entry.counterparty_wallet_id,
             created_at=entry.created_at,

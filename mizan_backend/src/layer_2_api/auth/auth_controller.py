@@ -19,10 +19,11 @@ itself.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Callable, Iterator, Tuple
+from typing import Callable, Iterable, Iterator, Optional, Tuple
 
 from fastapi import HTTPException, status
 
+from ...layer_3_business.authz.authorization_service import AuthorizationService
 from ...layer_3_business.auth.auth_exceptions import (
     InvalidCredentialsError,
     InvalidTokenError,
@@ -43,6 +44,8 @@ class AuthController:
         *,
         auth_service: AuthService,
         unit_of_work_factory: Callable[[], UnitOfWork] = UnitOfWork,
+        authorization_service: Optional[AuthorizationService] = None,
+        bootstrap_admin_emails: Iterable[str] = (),
     ) -> None:
         """
         Args:
@@ -54,9 +57,17 @@ class AuthController:
                 class is a valid factory for its own instances).
                 Injected so tests can point every unit of work this
                 controller opens at an isolated test database.
+            authorization_service: The Layer 3 service deciding a new
+                account's initial role.
+            bootstrap_admin_emails: Addresses granted `admin` on
+                registration, from `config.Settings`. See
+                `AuthorizationService.initial_role_for` for why this
+                exists at all.
         """
         self._auth_service = auth_service
         self._unit_of_work_factory = unit_of_work_factory
+        self._authorization_service = authorization_service or AuthorizationService()
+        self._bootstrap_admin_emails = tuple(bootstrap_admin_emails)
 
     async def register(
         self, *, email: str, password: str, full_name: str
@@ -89,8 +100,15 @@ class AuthController:
                     raise UserAlreadyExistsError(email)
 
                 hashed_password = self._auth_service.hash_password(password)
+                role = self._authorization_service.initial_role_for(
+                    email=email,
+                    bootstrap_admin_emails=self._bootstrap_admin_emails,
+                )
                 user = await uow.users.create_user(
-                    email=email, hashed_password=hashed_password, full_name=full_name
+                    email=email,
+                    hashed_password=hashed_password,
+                    full_name=full_name,
+                    role=role.value,
                 )
                 await uow.commit()
 

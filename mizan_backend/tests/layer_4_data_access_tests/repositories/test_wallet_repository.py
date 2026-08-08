@@ -27,7 +27,10 @@ from src.layer_4_data_access.repositories.wallet_repository import (
 )
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.db_config import build_engine, build_session_factory
-from src.layer_5_storage.models.transaction_ledger_model import TransactionType
+from src.layer_5_storage.models.transaction_ledger_model import (
+    EntryDirection,
+    TransactionType,
+)
 from src.layer_5_storage.models.user_model import UserModel
 
 
@@ -209,6 +212,7 @@ class TestAppendLedgerEntry:
             wallet_id=wallet.id,
             amount=Decimal("25"),
             transaction_type=TransactionType.DEPOSIT,
+            direction=EntryDirection.CREDIT,
         )
 
         assert isinstance(entry, LedgerEntryRecord)
@@ -228,6 +232,7 @@ class TestAppendLedgerEntry:
             wallet_id=sender.id,
             amount=Decimal("40"),
             transaction_type=TransactionType.TRANSFER,
+            direction=EntryDirection.DEBIT,
             reference_id="transfer-1",
             counterparty_wallet_id=receiver.id,
         )
@@ -235,6 +240,7 @@ class TestAppendLedgerEntry:
             wallet_id=receiver.id,
             amount=Decimal("40"),
             transaction_type=TransactionType.TRANSFER,
+            direction=EntryDirection.CREDIT,
             reference_id="transfer-1",
             counterparty_wallet_id=sender.id,
         )
@@ -251,4 +257,5 @@ class TestAppendLedgerEntry:
                 wallet_id="does-not-exist",
                 amount=Decimal("10"),
                 transaction_type=TransactionType.DEPOSIT,
+                direction=EntryDirection.CREDIT,
             )

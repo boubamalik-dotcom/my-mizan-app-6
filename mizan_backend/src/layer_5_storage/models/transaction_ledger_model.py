@@ -56,6 +56,25 @@ class TransactionType(str, enum.Enum):
     TRANSFER = "transfer"
 
 
+class EntryDirection(str, enum.Enum):
+    """Which way an entry moved the wallet's balance.
+
+    Recorded separately from `transaction_type` because the type alone
+    is not sufficient: a transfer writes two rows with the *same* type
+    and the *same* positive amount, one for each side. Without a
+    direction, those two rows are indistinguishable, and a balance
+    cannot be replayed from the ledger at all — which would leave the
+    audit trail unable to answer the one question it exists for.
+    """
+
+    #: Increased the balance: a deposit, or the receiving leg of a
+    #: transfer.
+    CREDIT = "credit"
+
+    #: Decreased it: a withdrawal, or the sending leg of a transfer.
+    DEBIT = "debit"
+
+
 class TransactionLedgerModel(Base, TimestampMixin):
     """A single, immutable record of one balance-affecting event.
 
@@ -90,6 +109,19 @@ class TransactionLedgerModel(Base, TimestampMixin):
     transaction_type: Mapped[TransactionType] = mapped_column(
         SqlEnum(TransactionType, name="transaction_type", native_enum=False),
         nullable=False,
+    )
+    #: Which way this entry moved the balance. See [EntryDirection] for
+    #: why `transaction_type` alone cannot answer that.
+    #:
+    #: Nullable only to remain readable against rows written before the
+    #: column existed. Those rows cannot be backfilled — the ledger is
+    #: append-only, and rewriting history to make an audit come out
+    #: right is precisely what this table is designed to prevent — so
+    #: the audit service reports them as unverifiable rather than
+    #: guessing. Every entry written from now on sets it.
+    direction: Mapped[Optional[EntryDirection]] = mapped_column(
+        SqlEnum(EntryDirection, name="entry_direction", native_enum=False),
+        nullable=True,
     )
     #: Correlates the two legs of a transfer (or, more generally, any
     #: group of related entries); a plain marker, not a foreign key,

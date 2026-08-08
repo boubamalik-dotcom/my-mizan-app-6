@@ -42,6 +42,7 @@ from ...layer_3_business.wallet.wallet_exceptions import (
 )
 from ...layer_3_business.wallet.wallet_service import WalletService
 from ...layer_4_data_access.repositories.wallet_repository import (
+    EntryDirection,
     TransactionType,
     WalletAlreadyExistsError,
     WalletConcurrencyConflictError,
@@ -219,6 +220,7 @@ class WalletController:
                     wallet_id=wallet.id,
                     amount=amount,
                     transaction_type=TransactionType.DEPOSIT,
+                    direction=EntryDirection.CREDIT,
                 )
                 await uow.commit()
 
@@ -270,6 +272,7 @@ class WalletController:
                     wallet_id=wallet.id,
                     amount=amount,
                     transaction_type=TransactionType.WITHDRAWAL,
+                    direction=EntryDirection.DEBIT,
                 )
                 await uow.commit()
 
@@ -368,10 +371,13 @@ class WalletController:
                 )
 
                 reference_id = uuid.uuid4().hex
+                # The two legs are distinguished only by `direction`:
+                # they share a type, a positive amount, and a reference.
                 await uow.wallets.append_ledger_entry(
                     wallet_id=source.id,
                     amount=amount,
                     transaction_type=TransactionType.TRANSFER,
+                    direction=EntryDirection.DEBIT,
                     reference_id=reference_id,
                     counterparty_wallet_id=destination.id,
                 )
@@ -379,6 +385,7 @@ class WalletController:
                     wallet_id=destination.id,
                     amount=amount,
                     transaction_type=TransactionType.TRANSFER,
+                    direction=EntryDirection.CREDIT,
                     reference_id=reference_id,
                     counterparty_wallet_id=source.id,
                 )

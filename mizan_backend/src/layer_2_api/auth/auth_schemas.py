@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr, Field
 
+from ...layer_3_business.authz.roles import Role
+
 #: Minimum acceptable password length. Enforced here (at the API
 #: boundary) rather than in Layer 3, since it is a UX/input-shape
 #: concern, not a cryptographic one — `AuthService.hash_password`
@@ -67,6 +69,10 @@ class UserResponse(BaseModel):
     email: str
     full_name: str
     is_active: bool
+    #: The account's access-control role. Exposed so a client knows
+    #: whether to offer audit tooling at all, rather than discovering
+    #: its absence through a 403.
+    role: Role = Role.USER
 
 
 class TokenResponse(BaseModel):

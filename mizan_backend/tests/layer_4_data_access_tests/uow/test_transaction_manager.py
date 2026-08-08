@@ -16,7 +16,10 @@ from src.layer_4_data_access.repositories.wallet_repository import (
 from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.db_config import build_engine, build_session_factory
-from src.layer_5_storage.models.transaction_ledger_model import TransactionType
+from src.layer_5_storage.models.transaction_ledger_model import (
+    EntryDirection,
+    TransactionType,
+)
 
 
 @pytest_asyncio.fixture
@@ -100,6 +103,7 @@ async def test_balance_update_and_ledger_entry_commit_together_atomically(
             wallet_id=wallet.id,
             amount=Decimal("100"),
             transaction_type=TransactionType.DEPOSIT,
+            direction=EntryDirection.CREDIT,
         )
         await uow.commit()
 
@@ -164,6 +168,7 @@ async def test_atomicity_when_second_operation_fails_mid_transaction(
                 wallet_id="does-not-exist",
                 amount=Decimal("500"),
                 transaction_type=TransactionType.DEPOSIT,
+                direction=EntryDirection.CREDIT,
             )
             await uow.commit()
 

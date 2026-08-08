@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
 
+from ...layer_3_business.authz.roles import Role
 from ...layer_4_data_access.repositories.user_repository import UserRecord
 from .auth_controller import AuthController
 from .auth_schemas import (
@@ -26,7 +27,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _to_user_response(user: UserRecord) -> UserResponse:
     return UserResponse(
-        id=user.id, email=user.email, full_name=user.full_name, is_active=user.is_active
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        is_active=user.is_active,
+        # Parsed rather than passed through: an unrecognised stored
+        # role is a data-integrity fault and must fail loudly here
+        # rather than travel out over the API as an unknown string.
+        role=Role.parse(user.role),
     )
 
 
