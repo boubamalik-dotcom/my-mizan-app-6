@@ -15,6 +15,24 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class CreateWalletRequest(BaseModel):
+    """Body for `POST /wallet`.
+
+    Every field has a default, so an empty body (`{}`, or no body at
+    all) is valid and creates a standard USD wallet — `currency` only
+    needs to be supplied to open a wallet in a different currency.
+    """
+
+    currency: str = Field(
+        default="USD",
+        min_length=3,
+        max_length=3,
+        description="The three-letter currency code for the new wallet.",
+    )
+
+    model_config = {"json_schema_extra": {"examples": [{"currency": "USD"}]}}
+
+
 class DepositRequest(BaseModel):
     """Body for `POST /wallet/deposit`."""
 

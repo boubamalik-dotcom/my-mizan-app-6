@@ -32,6 +32,8 @@ from pydantic import ValidationError
 from ...layer_3_business.auth.auth_exceptions import InvalidTokenError
 from ...layer_3_business.auth.auth_service import AuthService
 from ...layer_3_business.chat.exceptions import ChatDomainError
+from ...layer_4_data_access.repositories.user_repository import UserRecord
+from ..auth.deps import get_current_user
 from ..controllers.chat_controller import ChatController
 from ..schemas.chat_schemas import ChatHistoryResponse, ErrorResponse, WebSocketIncomingMessage
 
@@ -65,22 +67,49 @@ def get_auth_service_ws(websocket: WebSocket) -> AuthService:
 
 
 @router.get(
-    "/rooms/{room_id}/messages",
+    "/history/{client_id}",
     response_model=ChatHistoryResponse,
-    responses={400: {"model": ErrorResponse}},
-    summary="Retrieve chat history for a room",
+    responses={
+        400: {"model": ErrorResponse},
+        401: {
+            "model": ErrorResponse,
+            "description": "Missing or invalid access token.",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The authenticated caller's identity does not "
+            "match the requested client id.",
+        },
+    },
+    summary="Retrieve chat history for a room, scoped to the calling client",
 )
 async def get_chat_history(
-    room_id: str,
+    client_id: str,
+    room_id: str = Query(..., description="Room whose history to fetch."),
     limit: int = Query(default=50, ge=1, le=200),
     controller: ChatController = Depends(get_chat_controller),
+    current_user: UserRecord = Depends(get_current_user),
 ) -> ChatHistoryResponse:
     """Returns up to `limit` most recent messages for `room_id`,
     oldest first, plus whether older messages exist beyond this page.
 
+    Mirrors the WebSocket endpoint's identity check: `client_id` (the
+    path segment) must match the authenticated caller's own identity
+    (their account email, the same value used as the JWT subject and
+    as the chat participant id), or the request is rejected —
+    `HTTPException(403)` — before any history is fetched. This keeps
+    "who may read a room's history over REST" consistent with "who may
+    join that room over the WebSocket", even though the underlying
+    history itself is stored per-room rather than per-client.
+
     Raises `HTTPException(400)` if the room/business rules reject the
     request (translated from a Layer 3 `ChatDomainError`).
     """
+    if current_user.email != client_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
+        )
+
     try:
         return await controller.get_history(room_id=room_id, limit=limit)
     except ChatDomainError as exc:

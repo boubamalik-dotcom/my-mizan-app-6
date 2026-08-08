@@ -133,6 +133,87 @@ async def wallet(
     return await _create_wallet(session_factory, user_id=alice_id, balance=Decimal("100.00"))
 
 
+class TestCreateWallet:
+    async def test_creates_wallet_bound_to_the_authenticated_user(
+        self, client: AsyncClient, alice: Tuple[str, str]
+    ) -> None:
+        alice_id, alice_token = alice
+        response = await client.post(
+            "/api/v1/wallet", json={}, headers=_auth_headers(alice_token)
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["user_id"] == alice_id
+        assert body["currency"] == "USD"
+        assert Decimal(body["balance"]) == Decimal("0")
+        assert body["is_locked"] is False
+
+        # And the caller can immediately read it back as its owner.
+        balance_response = await client.get(
+            f"/api/v1/wallet/{body['wallet_id']}/balance",
+            headers=_auth_headers(alice_token),
+        )
+        assert balance_response.status_code == 200
+        assert balance_response.json()["user_id"] == alice_id
+
+    async def test_defaults_to_usd_when_no_body_is_sent(
+        self, client: AsyncClient, alice: Tuple[str, str]
+    ) -> None:
+        _alice_id, alice_token = alice
+        response = await client.post(
+            "/api/v1/wallet", headers=_auth_headers(alice_token)
+        )
+        assert response.status_code == 201
+        assert response.json()["currency"] == "USD"
+
+    async def test_creates_wallet_in_a_requested_currency(
+        self, client: AsyncClient, alice: Tuple[str, str]
+    ) -> None:
+        _alice_id, alice_token = alice
+        response = await client.post(
+            "/api/v1/wallet",
+            json={"currency": "EUR"},
+            headers=_auth_headers(alice_token),
+        )
+        assert response.status_code == 201
+        assert response.json()["currency"] == "EUR"
+
+    async def test_returns_409_for_a_duplicate_currency(
+        self, client: AsyncClient, alice: Tuple[str, str]
+    ) -> None:
+        _alice_id, alice_token = alice
+        first = await client.post(
+            "/api/v1/wallet", json={"currency": "GBP"}, headers=_auth_headers(alice_token)
+        )
+        assert first.status_code == 201
+
+        second = await client.post(
+            "/api/v1/wallet", json={"currency": "GBP"}, headers=_auth_headers(alice_token)
+        )
+        assert second.status_code == 409
+
+    async def test_two_users_may_each_hold_their_own_wallet_in_the_same_currency(
+        self, client: AsyncClient, alice: Tuple[str, str], bob: Tuple[str, str]
+    ) -> None:
+        _alice_id, alice_token = alice
+        _bob_id, bob_token = bob
+
+        alice_response = await client.post(
+            "/api/v1/wallet", json={"currency": "USD"}, headers=_auth_headers(alice_token)
+        )
+        bob_response = await client.post(
+            "/api/v1/wallet", json={"currency": "USD"}, headers=_auth_headers(bob_token)
+        )
+        assert alice_response.status_code == 201
+        assert bob_response.status_code == 201
+        assert alice_response.json()["wallet_id"] != bob_response.json()["wallet_id"]
+
+    async def test_returns_401_without_a_token(self, client: AsyncClient) -> None:
+        response = await client.post("/api/v1/wallet", json={})
+        assert response.status_code in (401, 403)
+
+
 class TestGetBalance:
     async def test_returns_wallet_balance(
         self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
@@ -496,7 +577,7 @@ class TestOpenApiDocumentation:
             for path, methods in schema["paths"].items()
             if path.startswith("/api/v1/wallet")
         }
-        assert len(wallet_paths) == 4
+        assert len(wallet_paths) == 5
 
         for path, methods in wallet_paths.items():
             for method, operation in methods.items():

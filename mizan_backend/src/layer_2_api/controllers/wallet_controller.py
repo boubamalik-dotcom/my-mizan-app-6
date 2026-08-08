@@ -43,6 +43,7 @@ from ...layer_3_business.wallet.wallet_exceptions import (
 from ...layer_3_business.wallet.wallet_service import WalletService
 from ...layer_4_data_access.repositories.wallet_repository import (
     TransactionType,
+    WalletAlreadyExistsError,
     WalletConcurrencyConflictError,
     WalletNotFoundError,
     WalletRecord,
@@ -73,6 +74,41 @@ class WalletController:
         """
         self._wallet_service = wallet_service
         self._unit_of_work_factory = unit_of_work_factory
+
+    # -- Creation -------------------------------------------------------
+
+    async def create_wallet(
+        self, *, currency: str, current_user_id: str
+    ) -> WalletRecord:
+        """Creates a new, zero-balance, unlocked wallet owned by the
+        authenticated caller.
+
+        No ownership check is needed here — unlike every other
+        method on this class, there is no pre-existing wallet to own
+        yet; `current_user_id` is simply who the new wallet is
+        created *for*.
+
+        Args:
+            currency: The three-letter currency code for the new
+                wallet.
+            current_user_id: The id of the authenticated caller, who
+                will own the new wallet.
+
+        Returns:
+            The newly created wallet's `WalletRecord` (balance `0`).
+
+        Raises:
+            HTTPException: 409 if the caller already has a wallet in
+                `currency`.
+        """
+        with self._translate_domain_errors():
+            async with self._unit_of_work_factory() as uow:
+                wallet = await uow.wallets.create_wallet(
+                    user_id=current_user_id, currency=currency
+                )
+                await uow.commit()
+
+        return wallet
 
     # -- Read ---------------------------------------------------------------
 
@@ -369,6 +405,7 @@ class WalletController:
         * `WalletLockedError` -> 423 Locked
         * `WalletNotFoundError` -> 404 Not Found
         * `WalletConcurrencyConflictError` -> 409 Conflict
+        * `WalletAlreadyExistsError` -> 409 Conflict
         """
         try:
             yield
@@ -392,4 +429,8 @@ class WalletController:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"{exc} Please retry the request.",
+            ) from exc
+        except WalletAlreadyExistsError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
             ) from exc

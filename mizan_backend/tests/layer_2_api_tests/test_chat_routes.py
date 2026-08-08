@@ -25,11 +25,13 @@ from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from src.layer_2_api.auth.auth_controller import AuthController
 from src.layer_2_api.main_router import api_router
 from src.layer_2_api.controllers.chat_controller import ChatController
 from src.layer_3_business.auth.auth_service import AuthService
 from src.layer_3_business.chat.chat_service import ChatService, MessageRateLimiter
 from src.layer_4_data_access.events.message_broker import RedisMessageBroker
+from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.db_config import build_engine, build_session_factory
 from src.layer_5_storage.implementations.chat_repository_impl import (
@@ -38,6 +40,7 @@ from src.layer_5_storage.implementations.chat_repository_impl import (
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 TEST_SECRET_KEY = "test-secret-key-at-least-32-bytes-long-for-hmac-sha256"
+TEST_PASSWORD = "correct-horse-battery-staple"
 
 
 async def _redis_available() -> bool:
@@ -79,11 +82,22 @@ async def _test_lifespan(app: FastAPI) -> AsyncIterator[None]:
     broker = RedisMessageBroker(REDIS_URL, channel_prefix=f"test-routes:{uuid.uuid4()}:")
     await broker.connect()
 
+    def unit_of_work_factory() -> UnitOfWork:
+        return UnitOfWork(session_factory)
+
+    auth_service = AuthService(secret_key=TEST_SECRET_KEY)
+
     # A generous rate limit so the test suite itself never trips it.
     service = ChatService(rate_limiter=MessageRateLimiter(max_messages=1000))
     controller = ChatController(chat_service=service, repository=repository, broker=broker)
     app.state.chat_controller = controller
-    app.state.auth_service = AuthService(secret_key=TEST_SECRET_KEY)
+    app.state.auth_service = auth_service
+    # Needed by `get_current_user` (via `get_auth_controller`), which
+    # `GET /chat/history/{client_id}` depends on — registration/login
+    # go through the same real `/auth/*` routes used in production.
+    app.state.auth_controller = AuthController(
+        auth_service=auth_service, unit_of_work_factory=unit_of_work_factory
+    )
 
     try:
         yield
@@ -120,8 +134,47 @@ def _ws_url(client_id: str, *, room_id: str, token: str | None) -> str:
     return url
 
 
+def _register_and_login(client: TestClient, *, email: str) -> str:
+    """Registers a real account (unlike `_token_for`, which mints a
+    token for an arbitrary subject with no backing account) and logs
+    in, returning its access token.
+
+    `GET /chat/history/{client_id}` depends on `get_current_user`,
+    which resolves the token's subject to a real, persisted user —
+    so, unlike the WebSocket route (which only decodes the token),
+    exercising it requires an account created through the real
+    `/auth/register` + `/auth/login` flow.
+    """
+    register_response = client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": TEST_PASSWORD, "full_name": "Test User"},
+    )
+    assert register_response.status_code == 201, register_response.text
+
+    login_response = client.post(
+        "/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD}
+    )
+    assert login_response.status_code == 200, login_response.text
+    return login_response.json()["access_token"]
+
+
+def _auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _history_url(client_id: str, *, room_id: str, limit: int | None = None) -> str:
+    url = f"/api/v1/chat/history/{client_id}?room_id={room_id}"
+    if limit is not None:
+        url += f"&limit={limit}"
+    return url
+
+
 def test_get_history_for_new_room_is_empty(client: TestClient) -> None:
-    response = client.get("/api/v1/chat/rooms/room-empty/messages")
+    token = _register_and_login(client, email="history-reader@example.com")
+    response = client.get(
+        _history_url("history-reader@example.com", room_id="room-empty"),
+        headers=_auth_headers(token),
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -142,8 +195,11 @@ def test_websocket_connect_receives_join_announcement(client: TestClient) -> Non
 def test_websocket_send_message_is_echoed_back_and_persisted(
     client: TestClient,
 ) -> None:
+    client_id = "alice-history@example.com"
+    token = _register_and_login(client, email=client_id)
+
     with client.websocket_connect(
-        _ws_url("alice", room_id="room-2", token=_token_for("alice"))
+        _ws_url(client_id, room_id="room-2", token=token)
     ) as websocket:
         websocket.receive_json()  # join announcement
 
@@ -152,9 +208,11 @@ def test_websocket_send_message_is_echoed_back_and_persisted(
 
         assert event["type"] == "message"
         assert event["data"]["content"] == "hello, world"
-        assert event["data"]["sender_id"] == "alice"
+        assert event["data"]["sender_id"] == client_id
 
-    history_response = client.get("/api/v1/chat/rooms/room-2/messages")
+    history_response = client.get(
+        _history_url(client_id, room_id="room-2"), headers=_auth_headers(token)
+    )
     messages = history_response.json()["messages"]
     text_messages = [m for m in messages if m["type"] == "text"]
     assert len(text_messages) == 1
@@ -218,7 +276,11 @@ def test_two_clients_in_same_room_receive_each_others_messages(
 
 
 def test_get_history_rejects_invalid_limit(client: TestClient) -> None:
-    response = client.get("/api/v1/chat/rooms/room-1/messages?limit=0")
+    token = _register_and_login(client, email="limit-tester@example.com")
+    response = client.get(
+        _history_url("limit-tester@example.com", room_id="room-1", limit=0),
+        headers=_auth_headers(token),
+    )
     assert response.status_code == 422
 
 
@@ -311,3 +373,60 @@ class TestWebSocketAuthentication:
         ) as websocket:
             event = websocket.receive_json()
             assert event["type"] == "system"
+
+
+class TestChatHistoryAuthorization:
+    """Security tests for `GET /chat/history/{client_id}`: it must
+    require a valid access token (via `get_current_user`, just like
+    every Wallet endpoint) and reject — with `HTTPException(403)` —
+    any request where `client_id` does not match the authenticated
+    caller's own identity, mirroring the WebSocket's `client_id` ==
+    token-subject rule."""
+
+    def test_returns_403_when_client_id_does_not_match_authenticated_user(
+        self, client: TestClient
+    ) -> None:
+        """The core cross-user guarantee: Alice's valid token must
+        never grant her access to a history request naming Bob's
+        identity as `client_id`, even though the room itself is the
+        same underlying resource either way."""
+        alice_token = _register_and_login(client, email="alice-cross@example.com")
+        _register_and_login(client, email="bob-cross@example.com")
+
+        response = client.get(
+            _history_url("bob-cross@example.com", room_id="room-shared"),
+            headers=_auth_headers(alice_token),
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Forbidden"
+
+    def test_returns_401_without_a_token(self, client: TestClient) -> None:
+        response = client.get(
+            _history_url("no-token@example.com", room_id="room-shared")
+        )
+        assert response.status_code in (401, 403)
+
+    def test_returns_401_with_a_malformed_token(self, client: TestClient) -> None:
+        response = client.get(
+            _history_url("someone@example.com", room_id="room-shared"),
+            headers=_auth_headers("not-a-real-jwt"),
+        )
+        assert response.status_code == 401
+
+    def test_succeeds_when_client_id_matches_authenticated_user(
+        self, client: TestClient
+    ) -> None:
+        """Sanity check that the ownership gate isn't over-broad: a
+        caller requesting history *as themselves* must still succeed."""
+        token = _register_and_login(client, email="carol-cross@example.com")
+
+        response = client.get(
+            _history_url("carol-cross@example.com", room_id="room-own"),
+            headers=_auth_headers(token),
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "room_id": "room-own",
+            "messages": [],
+            "has_more": False,
+        }

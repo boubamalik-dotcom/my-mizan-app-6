@@ -45,6 +45,24 @@ class WalletNotFoundError(WalletRepositoryError):
         super().__init__(f'Wallet "{wallet_id}" does not exist.')
 
 
+class WalletAlreadyExistsError(WalletRepositoryError):
+    """Raised when `create_wallet` would violate the one-wallet-per-
+    currency-per-user rule (`WalletModel`'s ``uq_wallet_user_currency``
+    unique constraint)."""
+
+    def __init__(self, user_id: str, currency: str) -> None:
+        """
+        Args:
+            user_id: The user who already has a wallet in `currency`.
+            currency: The currency code that collided.
+        """
+        self.user_id = user_id
+        self.currency = currency
+        super().__init__(
+            f'User "{user_id}" already has a wallet in "{currency}".'
+        )
+
+
 class WalletConcurrencyConflictError(WalletRepositoryError):
     """Raised when `update_wallet_balance` detects that a wallet's row
     was modified by another transaction since it was read — i.e. the
@@ -132,10 +150,18 @@ class WalletRepository:
 
         Returns:
             A `WalletRecord` snapshot of the newly created wallet.
+
+        Raises:
+            WalletAlreadyExistsError: If `user_id` already has a
+                wallet in `currency` (enforced by
+                ``uq_wallet_user_currency``).
         """
         wallet = WalletModel(user_id=user_id, currency=currency)
         self._session.add(wallet)
-        await self._session.flush()
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            raise WalletAlreadyExistsError(user_id, currency) from exc
         return self._to_record(wallet)
 
     async def get_wallet_by_id(self, wallet_id: str) -> Optional[WalletRecord]:

@@ -13,12 +13,13 @@ Wallet has no unauthenticated endpoints.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, status
 
 from ...layer_4_data_access.repositories.user_repository import UserRecord
 from ..auth.deps import get_current_user
 from ..controllers.wallet_controller import WalletController
 from ..schemas.wallet_schemas import (
+    CreateWalletRequest,
     DepositRequest,
     ErrorResponse,
     TransactionResponse,
@@ -71,6 +72,45 @@ def _to_balance_response(wallet) -> WalletBalanceResponse:
         is_locked=wallet.is_locked,
         version=wallet.version,
     )
+
+
+@router.post(
+    "",
+    response_model=WalletBalanceResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        401: _ERROR_RESPONSES[401],
+        409: {
+            "model": ErrorResponse,
+            "description": "The caller already has a wallet in this currency.",
+        },
+    },
+    summary="Create a new wallet for the authenticated user",
+    description=(
+        "Creates a new, zero-balance, unlocked wallet owned by the "
+        "authenticated caller. `currency` defaults to `USD` if the "
+        "request body is omitted. A user may hold at most one wallet "
+        "per currency — creating a second wallet in a currency the "
+        "caller already holds one in returns **409**."
+    ),
+)
+async def create_wallet(
+    body: CreateWalletRequest = CreateWalletRequest(),
+    controller: WalletController = Depends(get_wallet_controller),
+    current_user: UserRecord = Depends(get_current_user),
+) -> WalletBalanceResponse:
+    """Create a new wallet for the authenticated caller.
+
+    - **currency**: The three-letter currency code; defaults to `USD`.
+
+    Requires a valid `Authorization: Bearer <token>` header. Returns
+    **409** if the caller already has a wallet in the requested
+    currency.
+    """
+    wallet = await controller.create_wallet(
+        currency=body.currency, current_user_id=current_user.id
+    )
+    return _to_balance_response(wallet)
 
 
 @router.get(

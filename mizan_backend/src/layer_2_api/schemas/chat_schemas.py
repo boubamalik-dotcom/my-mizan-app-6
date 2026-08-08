@@ -27,7 +27,7 @@ class ChatMessageResponse(BaseModel):
 
 
 class ChatHistoryResponse(BaseModel):
-    """Response body for `GET /chat/rooms/{room_id}/messages`."""
+    """Response body for `GET /chat/history/{client_id}`."""
 
     room_id: str
     messages: list[ChatMessageResponse]
