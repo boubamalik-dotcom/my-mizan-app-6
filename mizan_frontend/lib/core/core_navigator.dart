@@ -4,6 +4,7 @@ import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/register_page.dart';
 import '../features/chat/presentation/pages/chat_room_page.dart';
 import '../features/dashboard/presentation/pages/dashboard_page.dart';
+import '../mini_programs/oran_real_estate/presentation/pages/property_listing_page.dart';
 import '../features/wallet/presentation/pages/wallet_details_page.dart';
 import '../shared/network/interceptors.dart' show kLoginRouteName;
 import 'mini_program_loader/mini_program_base.dart';
@@ -43,6 +44,16 @@ final class CoreRoutes {
 
   /// "الدردشة الآمنة" — the chat room: history plus live messaging.
   static const String chatRoom = '/chat';
+
+  /// "عقارات وهران" — the Oran Real Estate mini-program's listing
+  /// screen.
+  ///
+  /// A direct route *in addition to* reaching the same page through
+  /// [miniProgram]: the dashboard card pushes this so the destination
+  /// is addressable by name, while the mini-program loader keeps
+  /// working for anything that goes through the registry. Both render
+  /// `PropertyListingPage`.
+  static const String realEstate = '/real-estate';
 }
 
 /// Host Shell routing table.
@@ -119,6 +130,12 @@ final class CoreNavigator {
         return MaterialPageRoute<void>(
           settings: settings,
           builder: (_) => const ChatRoomPage(),
+        );
+
+      case CoreRoutes.realEstate:
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => const PropertyListingPage(),
         );
 
       case CoreRoutes.miniProgram:

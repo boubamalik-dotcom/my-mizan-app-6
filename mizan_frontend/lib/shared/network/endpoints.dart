@@ -49,6 +49,16 @@ class ApiEndpoints {
   /// so the caller must already know the recipient's wallet id.
   static const String walletTransfer = '/wallet/transfer';
 
+  // -- Oran Real Estate ---------------------------------------------------
+
+  /// `GET` — property listings, optionally narrowed by repeated
+  /// `amenities` query parameters.
+  ///
+  /// Not implemented in `mizan_backend` yet: `PropertyRepository` falls
+  /// back to a bundled showcase catalogue while this 404s, and switches
+  /// to live data the moment the endpoint ships.
+  static const String properties = '/properties';
+
   // -- Chat (REST) --------------------------------------------------------
 
   /// `GET` — a room's recent messages, oldest first. Requires a

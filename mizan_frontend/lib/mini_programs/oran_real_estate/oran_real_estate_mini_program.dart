@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/mini_program_loader/mini_program_base.dart';
-import '../../shared/design_system/widgets/mini_program_placeholder_page.dart';
+import 'presentation/pages/property_listing_page.dart';
 
 /// Entry point for the Oran Real Estate mini-program: property
 /// listings, virtual tours, and agent contact.
@@ -10,8 +10,12 @@ import '../../shared/design_system/widgets/mini_program_placeholder_page.dart';
 /// shell (registry, loader, navigator) ever references directly. Its
 /// feature UI lives under `presentation/`, domain rules under
 /// `domain/`, and persistence under `data/`, fully isolated from the
-/// other mini-programs — none of that is imported here yet, so this
-/// entry point currently renders a placeholder page.
+/// other mini-programs.
+///
+/// [buildRootWidget] returns the same `PropertyListingPage` that
+/// `CoreRoutes.realEstate` renders, so reaching the mini-program
+/// through the loader and reaching it by route land on one screen
+/// rather than diverging.
 class OranRealEstateMiniProgram extends BaseMiniProgram {
   @override
   String get id => 'oran_real_estate';
@@ -30,11 +34,6 @@ class OranRealEstateMiniProgram extends BaseMiniProgram {
 
   @override
   Widget buildRootWidget(BuildContext context) {
-    return MiniProgramPlaceholderPage(
-      title: title,
-      description: description,
-      icon: icon,
-      accentColor: accentColor,
-    );
+    return const PropertyListingPage();
   }
 }

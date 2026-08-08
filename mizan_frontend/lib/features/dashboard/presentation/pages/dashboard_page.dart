@@ -196,10 +196,14 @@ class HostDashboardPage extends StatelessWidget {
                                   icon: _registry
                                       .getById('oran_real_estate')
                                       .icon,
-                                  onTap: () => _openMiniProgram(
-                                    context,
-                                    'oran_real_estate',
-                                  ),
+                                  // Straight to the named route rather
+                                  // than through the mini-program
+                                  // loader: Oran Real Estate has a real
+                                  // screen now, so there is nothing to
+                                  // lazily resolve. Both paths render
+                                  // `PropertyListingPage`.
+                                  onTap: () => Navigator.of(context)
+                                      .pushNamed(CoreRoutes.realEstate),
                                 ),
                               ),
                             ],

@@ -7,6 +7,7 @@ import 'package:mizan_frontend/features/auth/presentation/pages/login_page.dart'
 import 'package:mizan_frontend/features/chat/presentation/state/chat_cubit.dart';
 import 'package:mizan_frontend/features/chat/presentation/state/chat_state.dart';
 import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
+import 'package:mizan_frontend/mini_programs/oran_real_estate/presentation/pages/property_listing_page.dart';
 import 'package:mizan_frontend/features/wallet/data/wallet_model.dart';
 import 'package:mizan_frontend/features/wallet/presentation/state/wallet_cubit.dart';
 import 'package:mizan_frontend/features/wallet/presentation/state/wallet_state.dart';
@@ -155,25 +156,53 @@ void main() {
       (WidgetTester tester) async {
     await pumpDashboard(tester);
 
-    // Pre-warm the loader outside the widget tree, simulating a
-    // mini-program that was already opened earlier in the session.
+    // Uses Tawazun rather than Oran Real Estate: Oran now has a real
+    // screen and its dashboard card pushes `CoreRoutes.realEstate`
+    // directly, so it no longer exercises the loader.
     final MiniProgram preloaded =
-        await MiniProgramLoader.instance.load('oran_real_estate');
+        await MiniProgramLoader.instance.load('tawazun_freight_ai');
     expect(preloaded.isInitialized, isTrue);
 
-    await tester.tap(find.text('Oran Real Estate'));
+    await tester.tap(find.text('Tawazun Freight AI'));
     await tester.pumpAndSettle();
 
     // Navigated away from the dashboard, straight to the mini-program's
     // own content.
     expect(find.text('المحفظة الرقمية'), findsNothing);
-    expect(find.text('Property listings, tours & agent contact'), findsWidgets);
+    expect(find.text('AI-powered logistics & freight tracking'), findsWidgets);
 
     // The exact same (already-initialized) instance was reused rather
     // than a fresh one being created and re-initialized.
     final MiniProgram reused =
-        await MiniProgramLoader.instance.load('oran_real_estate');
+        await MiniProgramLoader.instance.load('tawazun_freight_ai');
     expect(reused, same(preloaded));
+  });
+
+  testWidgets(
+      'the real estate route and the mini-program loader render the same '
+      'screen', (WidgetTester tester) async {
+    // Both entry points must agree: the dashboard pushes the named
+    // route, while anything going through the registry renders
+    // `buildRootWidget`. If those diverged, Oran Real Estate would have
+    // two different "main screens".
+    //
+    // Built rather than mounted: `PropertyListingPage` starts a real
+    // network request on creation, which has no place in a routing
+    // test.
+    await tester.pumpWidget(const SizedBox.shrink());
+    final BuildContext context = tester.element(find.byType(SizedBox));
+
+    final Route<dynamic> route = CoreNavigator.onGenerateRoute(
+      const RouteSettings(name: CoreRoutes.realEstate),
+    );
+    expect(
+      (route as MaterialPageRoute<dynamic>).builder(context),
+      isA<PropertyListingPage>(),
+    );
+
+    final MiniProgram oran =
+        await MiniProgramLoader.instance.load('oran_real_estate');
+    expect(oran.buildRootWidget(context), isA<PropertyListingPage>());
   });
 
   testWidgets('mizan_door screen never surfaces QR/payment related UI',

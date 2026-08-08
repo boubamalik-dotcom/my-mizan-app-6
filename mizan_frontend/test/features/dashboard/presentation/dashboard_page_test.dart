@@ -109,6 +109,14 @@ void main() {
             builder: (_) => const Scaffold(body: Text('OPENED_CHAT_ROOM')),
           );
         }
+        if (settings.name == CoreRoutes.realEstate) {
+          // Stubbed likewise; `property_listing_page_test.dart` covers
+          // the page.
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const Scaffold(body: Text('OPENED_REAL_ESTATE')),
+          );
+        }
         return null;
       },
     );
@@ -375,17 +383,17 @@ void main() {
       );
     });
 
-    testWidgets('tapping the Oran Real Estate card opens it by id',
+    testWidgets('tapping the Oran Real Estate card opens the real estate route',
         (WidgetTester tester) async {
+      // Unlike the other two mini-programs, Oran has a real screen, so
+      // its card goes straight to the named route instead of through
+      // the mini-program loader.
       await pumpDashboard(tester);
 
       await tester.tap(find.text('Oran Real Estate'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('OPENED_MINI_PROGRAM:oran_real_estate'),
-        findsOneWidget,
-      );
+      expect(find.text('OPENED_REAL_ESTATE'), findsOneWidget);
     });
 
     testWidgets(
