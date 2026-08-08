@@ -15,9 +15,11 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from config import get_settings
+from src.layer_2_api.auth.auth_controller import AuthController
 from src.layer_2_api.controllers.chat_controller import ChatController
 from src.layer_2_api.controllers.wallet_controller import WalletController
 from src.layer_2_api.main_router import api_router
+from src.layer_3_business.auth.auth_service import AuthService
 from src.layer_3_business.chat.chat_service import ChatService, MessageRateLimiter
 from src.layer_3_business.wallet.wallet_service import WalletService
 from src.layer_4_data_access.events.message_broker import RedisMessageBroker
@@ -61,9 +63,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         unit_of_work_factory=UnitOfWork,
     )
 
+    auth_controller = AuthController(
+        auth_service=AuthService(
+            secret_key=settings.jwt_secret_key,
+            algorithm=settings.jwt_algorithm,
+            access_token_expire_minutes=settings.access_token_expire_minutes,
+        ),
+        unit_of_work_factory=UnitOfWork,
+    )
+
     app.state.message_broker = message_broker
     app.state.chat_controller = chat_controller
     app.state.wallet_controller = wallet_controller
+    app.state.auth_controller = auth_controller
 
     logger.info("%s started (environment=%s)", settings.app_name, settings.environment)
     try:

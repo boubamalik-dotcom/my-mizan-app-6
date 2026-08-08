@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     chat_rate_limit_messages: int = 10
     chat_rate_limit_window_seconds: float = 10.0
 
+    # Authentication — JWT signing
+    #: INSECURE DEVELOPMENT DEFAULT. Production deployments MUST set
+    #: the `JWT_SECRET_KEY` environment variable to a high-entropy
+    #: secret (e.g. `openssl rand -hex 32`) — every token signed with
+    #: this default is forgeable by anyone who reads this source file.
+    jwt_secret_key: str = "insecure-development-secret-change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:

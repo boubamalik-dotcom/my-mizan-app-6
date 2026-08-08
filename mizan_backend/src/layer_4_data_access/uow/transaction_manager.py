@@ -1,9 +1,12 @@
-"""Layer 4 — asynchronous Unit of Work for the Digital Wallet.
+"""Layer 4 — asynchronous Unit of Work shared by every feature that
+needs an atomic database transaction (the Digital Wallet and
+Authentication, so far).
 
-Guarantees ACID transaction boundaries around one or more
-`WalletRepository` operations: a wallet's balance update and its
-corresponding ledger entry are always committed together, or not at
-all.
+Guarantees ACID transaction boundaries around one or more repository
+operations: e.g. a wallet's balance update and its corresponding
+ledger entry, or a new user account and whatever else a future
+registration flow needs to persist alongside it, are always committed
+together, or not at all.
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ from typing import Optional, Type
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...layer_5_storage.db_config import async_session_factory
+from ..repositories.user_repository import UserRepository
 from ..repositories.wallet_repository import WalletRepository
 
 logger = logging.getLogger(__name__)
@@ -21,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class UnitOfWork:
     """A single atomic transaction boundary around one or more
-    `WalletRepository` operations.
+    repository operations.
 
     Used as an async context manager::
 
@@ -37,6 +41,14 @@ class UnitOfWork:
                 wallet_id=wallet_id,
                 amount=amount,
                 transaction_type=TransactionType.DEPOSIT,
+            )
+            await uow.commit()
+
+    Or, for authentication::
+
+        async with UnitOfWork() as uow:
+            user = await uow.users.create_user(
+                email=email, hashed_password=hashed_password, full_name=full_name
             )
             await uow.commit()
 
@@ -73,12 +85,14 @@ class UnitOfWork:
         self._session_factory = session_factory
         self._session: Optional[AsyncSession] = None
         self.wallets: Optional[WalletRepository] = None
+        self.users: Optional[UserRepository] = None
 
     async def __aenter__(self) -> "UnitOfWork":
-        """Opens a new session/transaction and binds `self.wallets` to
-        it."""
+        """Opens a new session/transaction and binds every repository
+        (`self.wallets`, `self.users`) to it."""
         self._session = self._session_factory()
         self.wallets = WalletRepository(self._session)
+        self.users = UserRepository(self._session)
         return self
 
     async def __aexit__(
@@ -104,11 +118,12 @@ class UnitOfWork:
                 await self._session.close()
                 self._session = None
                 self.wallets = None
+                self.users = None
 
     async def commit(self) -> None:
-        """Durably commits every change made through `self.wallets`
-        during this unit of work. Must be called explicitly on every
-        success path.
+        """Durably commits every change made through this unit of
+        work's repositories (`self.wallets`, `self.users`). Must be
+        called explicitly on every success path.
 
         Raises:
             RuntimeError: If called outside of an active transaction
@@ -122,12 +137,12 @@ class UnitOfWork:
         await self._session.commit()
 
     async def rollback(self) -> None:
-        """Discards every change made through `self.wallets` during
-        this unit of work. Invoked automatically by `__aexit__` when
-        the ``async with`` block raises, but may also be called
-        explicitly (e.g. after detecting a business-rule violation
-        that should abort the transaction without raising). Safe to
-        call even if no session is currently open."""
+        """Discards every change made through this unit of work's
+        repositories during this transaction. Invoked automatically by
+        `__aexit__` when the ``async with`` block raises, but may also
+        be called explicitly (e.g. after detecting a business-rule
+        violation that should abort the transaction without raising).
+        Safe to call even if no session is currently open."""
         if self._session is None:
             return
         await self._session.rollback()
