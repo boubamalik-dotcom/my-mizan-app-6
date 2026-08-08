@@ -219,6 +219,37 @@ def test_websocket_send_message_is_echoed_back_and_persisted(
     assert text_messages[0]["content"] == "hello, world"
 
 
+def test_client_can_reconnect_after_disconnecting(client: TestClient) -> None:
+    """Reconnecting to a room must work as many times as the client
+    likes.
+
+    Leaving soft-deletes the `chat_participants` row (`left_at` is
+    stamped, the row stays), and `(thread_id, user_id)` is unique — so
+    re-joining used to attempt a second INSERT, raise `IntegrityError`,
+    and get turned into a `WS_1011_INTERNAL_ERROR` close by this route's
+    catch-all. The practical effect was that any client could join a
+    given room only once per lifetime: after their first disconnect,
+    every later connection was accepted and then immediately killed.
+    """
+    client_id = "reconnector@example.com"
+    token = _register_and_login(client, email=client_id)
+
+    for attempt in range(3):
+        with client.websocket_connect(
+            _ws_url(client_id, room_id="room-reconnect", token=token)
+        ) as websocket:
+            # Reaching a usable connection is the assertion: a failed
+            # rejoin closes the socket instead of answering.
+            websocket.send_json({"type": "ping"})
+
+            event = websocket.receive_json()
+            while event["type"] != "pong":
+                assert event["type"] != "error", f"attempt {attempt}: {event}"
+                event = websocket.receive_json()
+
+            assert event == {"type": "pong"}, f"attempt {attempt}"
+
+
 def test_websocket_ping_receives_pong(client: TestClient) -> None:
     with client.websocket_connect(
         _ws_url("alice", room_id="room-3", token=_token_for("alice"))

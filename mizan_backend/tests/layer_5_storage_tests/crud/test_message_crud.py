@@ -5,12 +5,13 @@ from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.crud import message_crud
 from src.layer_5_storage.db_config import build_engine, build_session_factory
-from src.layer_5_storage.models.message_model import MessageType
+from src.layer_5_storage.models.message_model import ChatParticipantModel, MessageType
 
 
 @pytest_asyncio.fixture
@@ -62,6 +63,68 @@ async def test_mark_participant_left_excludes_from_active_list(
 
     participants = await message_crud.list_active_participants(session, "room-1")
     assert participants == []
+
+
+async def test_participant_who_left_can_rejoin(session: AsyncSession) -> None:
+    """A participant must be able to rejoin a room they left.
+
+    `mark_participant_left` soft-deletes by stamping `left_at`, and
+    `(thread_id, user_id)` is unique — so a blind re-INSERT raised
+    `IntegrityError`, and the WebSocket route turned that into a `1011`
+    close. The effect was that a client could join a room exactly once
+    per lifetime: every reconnect after the first disconnect failed.
+    """
+    await message_crud.create_thread(session, "room-1", max_participants=10)
+    await message_crud.add_participant(session, "room-1", "alice")
+    await session.commit()
+
+    await message_crud.mark_participant_left(session, "room-1", "alice")
+    await session.commit()
+    assert await message_crud.list_active_participants(session, "room-1") == []
+
+    await message_crud.add_participant(session, "room-1", "alice")
+    await session.commit()
+
+    participants = await message_crud.list_active_participants(session, "room-1")
+    assert [p.user_id for p in participants] == ["alice"]
+    # Revived in place rather than duplicated.
+    assert participants[0].left_at is None
+
+
+async def test_rejoining_does_not_duplicate_the_participant_row(
+    session: AsyncSession,
+) -> None:
+    await message_crud.create_thread(session, "room-1", max_participants=10)
+
+    for _ in range(3):
+        await message_crud.add_participant(session, "room-1", "alice")
+        await session.commit()
+        await message_crud.mark_participant_left(session, "room-1", "alice")
+        await session.commit()
+
+    await message_crud.add_participant(session, "room-1", "alice")
+    await session.commit()
+
+    result = await session.execute(
+        select(ChatParticipantModel).where(
+            ChatParticipantModel.thread_id == "room-1",
+            ChatParticipantModel.user_id == "alice",
+        )
+    )
+    assert len(result.scalars().all()) == 1
+
+
+async def test_add_participant_is_idempotent_while_still_joined(
+    session: AsyncSession,
+) -> None:
+    # `ChatController.connect_client` relies on this for reconnects.
+    await message_crud.create_thread(session, "room-1", max_participants=10)
+    await message_crud.add_participant(session, "room-1", "alice")
+    await message_crud.add_participant(session, "room-1", "alice")
+    await session.commit()
+
+    participants = await message_crud.list_active_participants(session, "room-1")
+    assert [p.user_id for p in participants] == ["alice"]
 
 
 async def test_create_message_and_get_history_in_chronological_order(

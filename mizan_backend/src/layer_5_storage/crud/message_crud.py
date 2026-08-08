@@ -51,8 +51,29 @@ async def list_active_participants(
 async def add_participant(
     session: AsyncSession, thread_id: str, user_id: str
 ) -> ChatParticipantModel:
-    participant = ChatParticipantModel(thread_id=thread_id, user_id=user_id)
-    session.add(participant)
+    """Adds `user_id` to `thread_id`, reviving a prior membership rather
+    than inserting a second row for it.
+
+    `mark_participant_left` soft-deletes by stamping `left_at`, leaving
+    the row in place, and the table declares `(thread_id, user_id)`
+    unique. A blind INSERT therefore fails for anyone who has ever left
+    the room — which meant a participant could join a room exactly once
+    per lifetime, with every later reconnect dying as an
+    `IntegrityError` (surfaced to the client as a `1011` close).
+    """
+    statement = select(ChatParticipantModel).where(
+        ChatParticipantModel.thread_id == thread_id,
+        ChatParticipantModel.user_id == user_id,
+    )
+    result = await session.execute(statement)
+    participant = result.scalar_one_or_none()
+
+    if participant is not None:
+        participant.left_at = None
+    else:
+        participant = ChatParticipantModel(thread_id=thread_id, user_id=user_id)
+        session.add(participant)
+
     await session.flush()
     return participant
 
