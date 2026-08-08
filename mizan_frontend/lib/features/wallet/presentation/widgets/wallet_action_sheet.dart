@@ -92,6 +92,14 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
 
   bool _isSubmitting = false;
 
+  /// A rejected transaction's message, shown inside the sheet.
+  ///
+  /// Deliberately *not* a `SnackBar`: this sheet is a route above the
+  /// page, so a snackbar raised from here renders behind it and the
+  /// user never learns why their transaction failed. Success messages
+  /// still use a snackbar, since by then the sheet has closed.
+  String? _errorMessage;
+
   @override
   void dispose() {
     _amountController.dispose();
@@ -106,7 +114,11 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
     final double? amount = Validators.parseAmount(_amountController.text);
     if (amount == null) return;
 
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
     try {
       await widget.onSubmit(
         WalletActionInput(
@@ -119,25 +131,20 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on AppException catch (error) {
-      if (!mounted) return;
-      setState(() => _isSubmitting = false);
-      _showError(error.message);
+      _reportFailure(error.message);
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _isSubmitting = false);
-      _showError('تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.');
+      _reportFailure('تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.');
     }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: MizanColors.error,
-        ),
-      );
+  /// Leaves the form filled in so the user can adjust the amount and
+  /// retry without retyping.
+  void _reportFailure(String message) {
+    if (!mounted) return;
+    setState(() {
+      _isSubmitting = false;
+      _errorMessage = message;
+    });
   }
 
   @override
@@ -201,6 +208,10 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
                   enabled: !_isSubmitting,
                   validator: Validators.amount,
                 ),
+                if (_errorMessage != null) ...<Widget>[
+                  const SizedBox(height: AppSpacing.md),
+                  _SheetError(message: _errorMessage!),
+                ],
                 const SizedBox(height: AppSpacing.lg),
                 PrimaryButton(
                   label: widget.confirmLabel,
@@ -211,6 +222,46 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A rejected transaction's reason, sitting directly above the confirm
+/// button where the user is already looking.
+class _SheetError extends StatelessWidget {
+  const _SheetError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: MizanColors.error.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(AppRadius.card / 2),
+        border: Border.all(color: MizanColors.error.withOpacity(0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(
+            Icons.error_outline_rounded,
+            color: MizanColors.error,
+            size: 18,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: MizanColors.error),
+            ),
+          ),
+        ],
       ),
     );
   }

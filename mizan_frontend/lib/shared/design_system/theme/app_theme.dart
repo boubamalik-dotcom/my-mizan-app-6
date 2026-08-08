@@ -81,7 +81,14 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: MizanColors.navyDark,
-        contentTextStyle: const TextStyle(color: Colors.white),
+        // Sized explicitly: `contentTextStyle` replaces the default
+        // outright rather than merging into it, so omitting a size
+        // leaves snackbar text at the text painter's fallback.
+        contentTextStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+        ),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.card / 2),

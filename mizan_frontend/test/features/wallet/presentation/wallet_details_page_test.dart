@@ -192,8 +192,9 @@ void main() {
 
   group('withdraw', () {
     testWidgets(
-        'shows the backend\'s rejection message and keeps the sheet '
-        'open with the balance intact', (WidgetTester tester) async {
+        "shows the backend's rejection message inside the sheet, where it "
+        "can't be hidden behind it, and keeps the balance intact",
+        (WidgetTester tester) async {
       when(
         () => repository.withdraw(
           walletId: any(named: 'walletId'),
@@ -214,7 +215,17 @@ void main() {
       await tester.tap(find.text('تأكيد'));
       await tester.pumpAndSettle();
 
-      expect(find.text('الرصيد غير كافٍ لإتمام هذه العملية.'), findsOneWidget);
+      final Finder error = find.text('الرصيد غير كافٍ لإتمام هذه العملية.');
+      expect(error, findsOneWidget);
+      // The message must be rendered *within* the sheet, above the
+      // confirm button. A `SnackBar` here would be drawn behind the
+      // sheet, leaving the user staring at an apparently dead button.
+      expect(find.byType(SnackBar), findsNothing);
+      expect(
+        tester.getCenter(error).dy,
+        lessThan(tester.getCenter(find.text('تأكيد')).dy),
+      );
+
       // The form stays up so the user can correct the amount, and the
       // balance is unchanged.
       expect(find.text('سحب رصيد'), findsOneWidget);
