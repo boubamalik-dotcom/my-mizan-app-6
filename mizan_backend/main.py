@@ -63,12 +63,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         unit_of_work_factory=UnitOfWork,
     )
 
+    auth_service = AuthService(
+        secret_key=settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+        access_token_expire_minutes=settings.access_token_expire_minutes,
+    )
     auth_controller = AuthController(
-        auth_service=AuthService(
-            secret_key=settings.jwt_secret_key,
-            algorithm=settings.jwt_algorithm,
-            access_token_expire_minutes=settings.access_token_expire_minutes,
-        ),
+        auth_service=auth_service,
         unit_of_work_factory=UnitOfWork,
     )
 
@@ -76,6 +77,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.chat_controller = chat_controller
     app.state.wallet_controller = wallet_controller
     app.state.auth_controller = auth_controller
+    # Exposed separately (not just via `auth_controller`) so the Chat
+    # WebSocket route can validate a `?token=` query parameter without
+    # a database round trip — see
+    # `layer_2_api/routes/chat_routes.py::get_auth_service_ws`.
+    app.state.auth_service = auth_service
 
     logger.info("%s started (environment=%s)", settings.app_name, settings.environment)
     try:

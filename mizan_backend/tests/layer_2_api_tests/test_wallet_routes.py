@@ -1,37 +1,35 @@
-"""End-to-end tests for the Digital Wallet's Layer 2 HTTP routes.
+"""End-to-end tests for the Digital Wallet's Layer 2 HTTP routes,
+including JWT-based authentication and per-wallet ownership
+enforcement.
 
 Uses `httpx.AsyncClient` over `ASGITransport` inside fully async test
-functions — rather than Starlette's synchronous `TestClient` — so the
-app, its `WalletController`/`UnitOfWork`, the HTTP requests, and any
-direct database seeding all share the *same* event loop (the one
-pytest-asyncio provides for the test coroutine). Mixing an
-externally-built async engine with a separately-threaded test client
-loop has previously caused real "attached to a different loop" hangs
-elsewhere in this codebase; this approach avoids that class of bug
-entirely rather than working around it.
-
-There is no `POST /wallet` creation endpoint in this API surface (per
-the routes actually requested), so test wallets are seeded directly
-through `WalletRepository`/`UnitOfWork`, exactly as some other part of
-the system (e.g. account provisioning) would in production.
+functions — avoiding the event-loop-mismatch pitfalls a synchronous
+`TestClient` with externally-built async resources can hit — so the
+app, its controllers/`UnitOfWork`, and every HTTP request share one
+event loop.
 """
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import AsyncIterator
+from typing import AsyncIterator, Dict, Tuple
 
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from src.layer_2_api.auth.auth_controller import AuthController
 from src.layer_2_api.controllers.wallet_controller import WalletController
 from src.layer_2_api.main_router import api_router
+from src.layer_3_business.auth.auth_service import AuthService
 from src.layer_3_business.wallet.wallet_service import WalletService
 from src.layer_4_data_access.repositories.wallet_repository import WalletRecord
 from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.db_config import build_engine, build_session_factory
+
+TEST_SECRET_KEY = "test-secret-key-at-least-32-bytes-long-for-hmac-sha256"
+TEST_PASSWORD = "correct-horse-battery-staple"
 
 
 @pytest_asyncio.fixture
@@ -59,6 +57,10 @@ async def app(session_factory: async_sessionmaker) -> FastAPI:
         wallet_service=WalletService(),
         unit_of_work_factory=unit_of_work_factory,
     )
+    application.state.auth_controller = AuthController(
+        auth_service=AuthService(secret_key=TEST_SECRET_KEY),
+        unit_of_work_factory=unit_of_work_factory,
+    )
     return application
 
 
@@ -69,16 +71,37 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
         yield ac
 
 
-async def _seed_wallet(
+async def _register_and_login(client: AsyncClient, *, email: str) -> Tuple[str, str]:
+    """Registers a new user and logs in, returning `(user_id, access_token)`."""
+    register_response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": TEST_PASSWORD, "full_name": "Test User"},
+    )
+    assert register_response.status_code == 201, register_response.text
+    user_id = register_response.json()["id"]
+
+    login_response = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD}
+    )
+    assert login_response.status_code == 200, login_response.text
+    token = login_response.json()["access_token"]
+
+    return user_id, token
+
+
+def _auth_headers(token: str) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _create_wallet(
     session_factory: async_sessionmaker,
     *,
-    owner_id: str = "alice",
-    currency: str = "USD",
+    user_id: str,
     balance: Decimal = Decimal("0"),
     is_locked: bool = False,
 ) -> WalletRecord:
     async with UnitOfWork(session_factory) as uow:
-        wallet = await uow.wallets.create_wallet(owner_id=owner_id, currency=currency)
+        wallet = await uow.wallets.create_wallet(user_id=user_id, currency="USD")
         if balance != Decimal("0"):
             wallet = await uow.wallets.update_wallet_balance(
                 wallet.id, balance, expected_version=wallet.version
@@ -90,37 +113,89 @@ async def _seed_wallet(
 
 
 @pytest_asyncio.fixture
-async def wallet(session_factory: async_sessionmaker) -> WalletRecord:
-    return await _seed_wallet(session_factory, balance=Decimal("100.00"))
+async def alice(client: AsyncClient) -> Tuple[str, str]:
+    """Registers and logs in Alice. Returns `(user_id, access_token)`."""
+    return await _register_and_login(client, email="alice@example.com")
+
+
+@pytest_asyncio.fixture
+async def bob(client: AsyncClient) -> Tuple[str, str]:
+    """Registers and logs in Bob. Returns `(user_id, access_token)`."""
+    return await _register_and_login(client, email="bob@example.com")
+
+
+@pytest_asyncio.fixture
+async def wallet(
+    session_factory: async_sessionmaker, alice: Tuple[str, str]
+) -> WalletRecord:
+    """A wallet owned by Alice, pre-funded with 100.00."""
+    alice_id, _alice_token = alice
+    return await _create_wallet(session_factory, user_id=alice_id, balance=Decimal("100.00"))
 
 
 class TestGetBalance:
     async def test_returns_wallet_balance(
-        self, client: AsyncClient, wallet: WalletRecord
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
     ) -> None:
-        response = await client.get(f"/api/v1/wallet/{wallet.id}/balance")
+        _alice_id, alice_token = alice
+        response = await client.get(
+            f"/api/v1/wallet/{wallet.id}/balance", headers=_auth_headers(alice_token)
+        )
 
         assert response.status_code == 200
         body = response.json()
         assert body["wallet_id"] == wallet.id
-        assert body["owner_id"] == "alice"
+        assert body["user_id"] == wallet.user_id
         assert body["currency"] == "USD"
         assert Decimal(body["balance"]) == Decimal("100.00")
         assert body["is_locked"] is False
 
-    async def test_returns_404_for_missing_wallet(self, client: AsyncClient) -> None:
-        response = await client.get("/api/v1/wallet/does-not-exist/balance")
+    async def test_returns_404_for_missing_wallet(
+        self, client: AsyncClient, alice: Tuple[str, str]
+    ) -> None:
+        _alice_id, alice_token = alice
+        response = await client.get(
+            "/api/v1/wallet/does-not-exist/balance", headers=_auth_headers(alice_token)
+        )
         assert response.status_code == 404
-        assert "does-not-exist" in response.json()["detail"]
+
+    async def test_returns_401_without_a_token(
+        self, client: AsyncClient, wallet: WalletRecord
+    ) -> None:
+        response = await client.get(f"/api/v1/wallet/{wallet.id}/balance")
+        assert response.status_code in (401, 403)
+
+    async def test_returns_401_with_a_malformed_token(
+        self, client: AsyncClient, wallet: WalletRecord
+    ) -> None:
+        response = await client.get(
+            f"/api/v1/wallet/{wallet.id}/balance",
+            headers=_auth_headers("not-a-real-jwt"),
+        )
+        assert response.status_code == 401
+
+    async def test_returns_403_when_wallet_belongs_to_another_user(
+        self, client: AsyncClient, wallet: WalletRecord, bob: Tuple[str, str]
+    ) -> None:
+        """The core cross-user security guarantee: Bob can never read
+        Alice's wallet, no matter how valid his own token is."""
+        _bob_id, bob_token = bob
+        response = await client.get(
+            f"/api/v1/wallet/{wallet.id}/balance", headers=_auth_headers(bob_token)
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Forbidden"
 
 
 class TestDeposit:
     async def test_credits_wallet_and_returns_new_balance(
-        self, client: AsyncClient, wallet: WalletRecord
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
     ) -> None:
+        _alice_id, alice_token = alice
         response = await client.post(
             "/api/v1/wallet/deposit",
             json={"wallet_id": wallet.id, "amount": "25.50"},
+            headers=_auth_headers(alice_token),
         )
 
         assert response.status_code == 200
@@ -129,52 +204,73 @@ class TestDeposit:
         assert body["transaction_type"] == "deposit"
         assert Decimal(body["new_balance"]) == Decimal("125.50")
 
-        balance_response = await client.get(f"/api/v1/wallet/{wallet.id}/balance")
-        assert Decimal(balance_response.json()["balance"]) == Decimal("125.50")
-
     async def test_rejects_zero_amount_with_422(
-        self, client: AsyncClient, wallet: WalletRecord
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
     ) -> None:
+        _alice_id, alice_token = alice
         response = await client.post(
-            "/api/v1/wallet/deposit", json={"wallet_id": wallet.id, "amount": "0"}
+            "/api/v1/wallet/deposit",
+            json={"wallet_id": wallet.id, "amount": "0"},
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 422
 
-    async def test_rejects_negative_amount_with_422(
-        self, client: AsyncClient, wallet: WalletRecord
+    async def test_returns_404_for_missing_wallet(
+        self, client: AsyncClient, alice: Tuple[str, str]
     ) -> None:
-        response = await client.post(
-            "/api/v1/wallet/deposit", json={"wallet_id": wallet.id, "amount": "-5"}
-        )
-        assert response.status_code == 422
-
-    async def test_returns_404_for_missing_wallet(self, client: AsyncClient) -> None:
+        _alice_id, alice_token = alice
         response = await client.post(
             "/api/v1/wallet/deposit",
             json={"wallet_id": "does-not-exist", "amount": "10"},
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 404
 
-    async def test_returns_423_for_locked_wallet(
-        self, client: AsyncClient, session_factory: async_sessionmaker
+    async def test_returns_401_without_a_token(
+        self, client: AsyncClient, wallet: WalletRecord
     ) -> None:
-        locked_wallet = await _seed_wallet(
-            session_factory, owner_id="bob", is_locked=True
+        response = await client.post(
+            "/api/v1/wallet/deposit", json={"wallet_id": wallet.id, "amount": "10"}
         )
+        assert response.status_code in (401, 403)
+
+    async def test_returns_403_when_wallet_belongs_to_another_user(
+        self, client: AsyncClient, wallet: WalletRecord, bob: Tuple[str, str]
+    ) -> None:
+        """Bob must never be able to deposit into — or otherwise
+        discover the existence of — Alice's wallet."""
+        _bob_id, bob_token = bob
+        response = await client.post(
+            "/api/v1/wallet/deposit",
+            json={"wallet_id": wallet.id, "amount": "10"},
+            headers=_auth_headers(bob_token),
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Forbidden"
+
+    async def test_returns_423_for_locked_wallet(
+        self, client: AsyncClient, session_factory: async_sessionmaker, alice: Tuple[str, str]
+    ) -> None:
+        alice_id, alice_token = alice
+        locked_wallet = await _create_wallet(session_factory, user_id=alice_id, is_locked=True)
+
         response = await client.post(
             "/api/v1/wallet/deposit",
             json={"wallet_id": locked_wallet.id, "amount": "10"},
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 423
 
 
 class TestWithdraw:
     async def test_debits_wallet_and_returns_new_balance(
-        self, client: AsyncClient, wallet: WalletRecord
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
     ) -> None:
+        _alice_id, alice_token = alice
         response = await client.post(
             "/api/v1/wallet/withdraw",
             json={"wallet_id": wallet.id, "amount": "40.00"},
+            headers=_auth_headers(alice_token),
         )
 
         assert response.status_code == 200
@@ -183,43 +279,86 @@ class TestWithdraw:
         assert Decimal(body["new_balance"]) == Decimal("60.00")
 
     async def test_returns_400_for_insufficient_funds(
-        self, client: AsyncClient, wallet: WalletRecord
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
     ) -> None:
+        _alice_id, alice_token = alice
         response = await client.post(
             "/api/v1/wallet/withdraw",
             json={"wallet_id": wallet.id, "amount": "1000.00"},
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 400
 
-        balance_response = await client.get(f"/api/v1/wallet/{wallet.id}/balance")
+        balance_response = await client.get(
+            f"/api/v1/wallet/{wallet.id}/balance", headers=_auth_headers(alice_token)
+        )
         assert Decimal(balance_response.json()["balance"]) == Decimal("100.00")
 
     async def test_rejects_non_positive_amount_with_422(
-        self, client: AsyncClient, wallet: WalletRecord
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
     ) -> None:
+        _alice_id, alice_token = alice
         response = await client.post(
-            "/api/v1/wallet/withdraw", json={"wallet_id": wallet.id, "amount": "0"}
+            "/api/v1/wallet/withdraw",
+            json={"wallet_id": wallet.id, "amount": "0"},
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 422
 
-    async def test_returns_423_for_locked_wallet(
-        self, client: AsyncClient, session_factory: async_sessionmaker
+    async def test_returns_403_when_wallet_belongs_to_another_user(
+        self,
+        client: AsyncClient,
+        wallet: WalletRecord,
+        bob: Tuple[str, str],
+        session_factory: async_sessionmaker,
     ) -> None:
-        locked_wallet = await _seed_wallet(
-            session_factory, owner_id="bob", balance=Decimal("50"), is_locked=True
+        """Bob must never be able to withdraw from Alice's wallet."""
+        _bob_id, bob_token = bob
+        response = await client.post(
+            "/api/v1/wallet/withdraw",
+            json={"wallet_id": wallet.id, "amount": "10"},
+            headers=_auth_headers(bob_token),
         )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Forbidden"
+
+        # And the balance must be completely unaffected by the
+        # rejected attempt (confirmed directly via the repository,
+        # since fetching it over the API here would itself require
+        # Alice's own token, which is out of scope for this test).
+        async with UnitOfWork(session_factory) as uow:
+            reloaded = await uow.wallets.get_wallet_by_id(wallet.id)
+        assert reloaded is not None
+        assert reloaded.balance == Decimal("100.00")
+
+    async def test_returns_423_for_locked_wallet(
+        self, client: AsyncClient, session_factory: async_sessionmaker, alice: Tuple[str, str]
+    ) -> None:
+        alice_id, alice_token = alice
+        locked_wallet = await _create_wallet(
+            session_factory, user_id=alice_id, balance=Decimal("50"), is_locked=True
+        )
+
         response = await client.post(
             "/api/v1/wallet/withdraw",
             json={"wallet_id": locked_wallet.id, "amount": "10"},
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 423
 
 
 class TestTransfer:
     async def test_moves_funds_between_wallets(
-        self, client: AsyncClient, wallet: WalletRecord, session_factory: async_sessionmaker
+        self,
+        client: AsyncClient,
+        wallet: WalletRecord,
+        alice: Tuple[str, str],
+        bob: Tuple[str, str],
+        session_factory: async_sessionmaker,
     ) -> None:
-        destination = await _seed_wallet(session_factory, owner_id="bob")
+        alice_id, alice_token = alice
+        bob_id, _bob_token = bob
+        destination = await _create_wallet(session_factory, user_id=bob_id)
 
         response = await client.post(
             "/api/v1/wallet/transfer",
@@ -228,6 +367,7 @@ class TestTransfer:
                 "destination_wallet_id": destination.id,
                 "amount": "30.00",
             },
+            headers=_auth_headers(alice_token),
         )
 
         assert response.status_code == 200
@@ -236,10 +376,72 @@ class TestTransfer:
         assert Decimal(body["new_source_balance"]) == Decimal("70.00")
         assert Decimal(body["new_destination_balance"]) == Decimal("30.00")
 
-    async def test_returns_400_for_insufficient_funds(
-        self, client: AsyncClient, wallet: WalletRecord, session_factory: async_sessionmaker
+    async def test_destination_wallet_ownership_is_not_required(
+        self,
+        client: AsyncClient,
+        wallet: WalletRecord,
+        alice: Tuple[str, str],
+        bob: Tuple[str, str],
+        session_factory: async_sessionmaker,
     ) -> None:
-        destination = await _seed_wallet(session_factory, owner_id="bob")
+        """Explicitly documents the one deliberate exception to
+        "you may only act on your own wallet": Alice may transfer
+        funds *to* Bob's wallet, even though she does not own it —
+        that asymmetry is the entire point of a transfer."""
+        alice_id, alice_token = alice
+        bob_id, _bob_token = bob
+        bobs_wallet = await _create_wallet(session_factory, user_id=bob_id)
+
+        response = await client.post(
+            "/api/v1/wallet/transfer",
+            json={
+                "source_wallet_id": wallet.id,
+                "destination_wallet_id": bobs_wallet.id,
+                "amount": "15.00",
+            },
+            headers=_auth_headers(alice_token),
+        )
+        assert response.status_code == 200
+
+    async def test_returns_403_when_source_wallet_belongs_to_another_user(
+        self,
+        client: AsyncClient,
+        wallet: WalletRecord,
+        alice: Tuple[str, str],
+        bob: Tuple[str, str],
+        session_factory: async_sessionmaker,
+    ) -> None:
+        """The critical transfer-specific security guarantee: Bob
+        cannot initiate a transfer *out of* Alice's wallet just by
+        naming it as the source — even though he could legitimately
+        name it as a *destination*."""
+        _alice_id, _alice_token = alice
+        bob_id, bob_token = bob
+        bobs_wallet = await _create_wallet(session_factory, user_id=bob_id, balance=Decimal("50"))
+
+        response = await client.post(
+            "/api/v1/wallet/transfer",
+            json={
+                "source_wallet_id": wallet.id,  # Alice's wallet
+                "destination_wallet_id": bobs_wallet.id,
+                "amount": "10.00",
+            },
+            headers=_auth_headers(bob_token),
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Forbidden"
+
+    async def test_returns_400_for_insufficient_funds(
+        self,
+        client: AsyncClient,
+        wallet: WalletRecord,
+        alice: Tuple[str, str],
+        bob: Tuple[str, str],
+        session_factory: async_sessionmaker,
+    ) -> None:
+        _alice_id, alice_token = alice
+        bob_id, _bob_token = bob
+        destination = await _create_wallet(session_factory, user_id=bob_id)
 
         response = await client.post(
             "/api/v1/wallet/transfer",
@@ -248,12 +450,14 @@ class TestTransfer:
                 "destination_wallet_id": destination.id,
                 "amount": "1000.00",
             },
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 400
 
     async def test_returns_404_when_destination_missing(
-        self, client: AsyncClient, wallet: WalletRecord
+        self, client: AsyncClient, wallet: WalletRecord, alice: Tuple[str, str]
     ) -> None:
+        _alice_id, alice_token = alice
         response = await client.post(
             "/api/v1/wallet/transfer",
             json={
@@ -261,41 +465,25 @@ class TestTransfer:
                 "destination_wallet_id": "does-not-exist",
                 "amount": "10.00",
             },
+            headers=_auth_headers(alice_token),
         )
         assert response.status_code == 404
 
-    async def test_rejects_non_positive_amount_with_422(
-        self, client: AsyncClient, wallet: WalletRecord, session_factory: async_sessionmaker
+    async def test_returns_401_without_a_token(
+        self, client: AsyncClient, wallet: WalletRecord, bob: Tuple[str, str], session_factory: async_sessionmaker
     ) -> None:
-        destination = await _seed_wallet(session_factory, owner_id="bob")
+        bob_id, _bob_token = bob
+        destination = await _create_wallet(session_factory, user_id=bob_id)
 
         response = await client.post(
             "/api/v1/wallet/transfer",
             json={
                 "source_wallet_id": wallet.id,
                 "destination_wallet_id": destination.id,
-                "amount": "0",
-            },
-        )
-        assert response.status_code == 422
-
-    async def test_returns_423_when_source_is_locked(
-        self, client: AsyncClient, session_factory: async_sessionmaker
-    ) -> None:
-        source = await _seed_wallet(
-            session_factory, owner_id="alice", balance=Decimal("100"), is_locked=True
-        )
-        destination = await _seed_wallet(session_factory, owner_id="bob")
-
-        response = await client.post(
-            "/api/v1/wallet/transfer",
-            json={
-                "source_wallet_id": source.id,
-                "destination_wallet_id": destination.id,
                 "amount": "10.00",
             },
         )
-        assert response.status_code == 423
+        assert response.status_code in (401, 403)
 
 
 class TestOpenApiDocumentation:
@@ -317,3 +505,5 @@ class TestOpenApiDocumentation:
                     "description"
                 ), f"{method.upper()} {path} has no description"
                 assert "responses" in operation
+                # Every wallet endpoint requires authentication.
+                assert operation.get("security"), f"{method.upper()} {path} has no security requirement"

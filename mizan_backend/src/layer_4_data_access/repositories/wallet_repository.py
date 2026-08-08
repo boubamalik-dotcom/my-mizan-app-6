@@ -78,7 +78,7 @@ class WalletRecord:
     to import (or even know about) SQLAlchemy."""
 
     id: str
-    owner_id: str
+    user_id: str
     currency: str
     balance: Decimal
     is_locked: bool
@@ -118,18 +118,22 @@ class WalletRepository:
         """
         self._session = session
 
-    async def create_wallet(self, *, owner_id: str, currency: str) -> WalletRecord:
-        """Creates and persists a new, zero-balance, unlocked wallet.
+    async def create_wallet(self, *, user_id: str, currency: str) -> WalletRecord:
+        """Creates and persists a new, zero-balance, unlocked wallet
+        linked to `user_id`.
 
         Args:
-            owner_id: The identifier of the wallet's owner.
+            user_id: The id of the registered user (`UserModel.id`)
+                this wallet belongs to. Enforced as a real foreign key
+                by `WalletModel` — creating a wallet for a `user_id`
+                that does not exist raises `IntegrityError`.
             currency: The three-letter currency code this wallet is
                 denominated in.
 
         Returns:
             A `WalletRecord` snapshot of the newly created wallet.
         """
-        wallet = WalletModel(owner_id=owner_id, currency=currency)
+        wallet = WalletModel(user_id=user_id, currency=currency)
         self._session.add(wallet)
         await self._session.flush()
         return self._to_record(wallet)
@@ -279,7 +283,7 @@ class WalletRepository:
         counterpart."""
         return WalletRecord(
             id=wallet.id,
-            owner_id=wallet.owner_id,
+            user_id=wallet.user_id,
             currency=wallet.currency,
             balance=wallet.balance,
             is_locked=wallet.is_locked,

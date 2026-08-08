@@ -2,21 +2,29 @@
 
 `WalletController` orchestrates the Digital Wallet's use cases:
 
-1. Calls Layer 3 (`WalletService`) to validate amounts and business
-   rules — pure logic, no I/O — *before* any database write is
+1. Enforces ownership: every method that names a wallet id fetches it
+   and immediately checks that it belongs to the authenticated caller
+   (`wallet.user_id == current_user_id`), raising `HTTPException(403)`
+   *before* any further database query — validation, balance
+   computation, or write — is attempted for that wallet. A transfer's
+   destination wallet is deliberately exempt (see `transfer` below):
+   sending money *to* someone else's wallet is the entire point of a
+   transfer.
+2. Calls Layer 3 (`WalletService`) to validate amounts and business
+   rules — pure logic, no I/O — before any database write is
    attempted.
-2. Uses Layer 4 (`UnitOfWork`, `WalletRepository`) to execute the
+3. Uses Layer 4 (`UnitOfWork`, `WalletRepository`) to execute the
    actual balance update and ledger append together, atomically,
    inside a single Unit of Work.
-3. Catches every domain exception raised by Layers 3/4
+4. Catches every domain exception raised by Layers 3/4
    (`wallet_exceptions.py` and `wallet_repository.py`) and translates
    it into the appropriate FastAPI `HTTPException`, so this is the
    *only* place in the backend where a wallet domain error becomes an
    HTTP status code.
 
 `wallet_routes.py` stays a thin adapter over this class: it never
-contains business logic or exception-translation logic itself, only
-request/response marshalling.
+contains business logic, ownership checks, or exception-translation
+logic itself, only request/response marshalling.
 """
 from __future__ import annotations
 
@@ -68,46 +76,56 @@ class WalletController:
 
     # -- Read ---------------------------------------------------------------
 
-    async def get_balance(self, wallet_id: str) -> WalletRecord:
+    async def get_balance(self, wallet_id: str, *, current_user_id: str) -> WalletRecord:
         """Fetches a wallet's current balance and status.
 
         Args:
             wallet_id: The wallet to fetch.
+            current_user_id: The id of the authenticated caller, as
+                resolved by `layer_2_api.auth.deps.get_current_user`.
 
         Returns:
             The wallet's current `WalletRecord`.
 
         Raises:
-            HTTPException: 404 if `wallet_id` does not exist.
+            HTTPException: 404 if `wallet_id` does not exist, or 403
+                if it does not belong to `current_user_id`.
         """
         with self._translate_domain_errors():
             async with self._unit_of_work_factory() as uow:
                 wallet = self._require_wallet(
                     await uow.wallets.get_wallet_by_id(wallet_id), wallet_id
                 )
+                self._require_ownership(wallet, current_user_id)
         return wallet
 
     # -- Deposits & withdrawals -------------------------------------------
 
-    async def deposit(self, *, wallet_id: str, amount: Decimal) -> WalletRecord:
+    async def deposit(
+        self, *, wallet_id: str, amount: Decimal, current_user_id: str
+    ) -> WalletRecord:
         """Credits `wallet_id` by `amount`.
 
         Validates the amount via Layer 3 *before* opening any database
         transaction — an obviously-invalid amount (zero, negative, not
         a finite `Decimal`) is rejected without ever touching the
-        database.
+        database. Ownership is checked immediately after the wallet is
+        fetched, before the balance update or ledger append (the
+        actual writes) are attempted.
 
         Args:
             wallet_id: The wallet to credit.
             amount: The amount to deposit.
+            current_user_id: The id of the authenticated caller.
 
         Returns:
             The wallet's `WalletRecord` after the deposit.
 
         Raises:
             HTTPException: 422 for an invalid amount, 404 if
-                `wallet_id` does not exist, 423 if the wallet is
-                locked, or 409 on a concurrency conflict.
+                `wallet_id` does not exist, 403 if it does not belong
+                to `current_user_id`, 423 if the wallet is locked, or
+                409 on a concurrency conflict.
         """
         with self._translate_domain_errors():
             self._wallet_service.validate_deposit_amount(amount)
@@ -117,6 +135,7 @@ class WalletController:
                 wallet = self._require_wallet(
                     await uow.wallets.get_wallet_by_id(wallet_id), wallet_id
                 )
+                self._require_ownership(wallet, current_user_id)
                 self._wallet_service.ensure_wallet_is_unlocked(
                     wallet.id, wallet.is_locked
                 )
@@ -136,18 +155,22 @@ class WalletController:
 
         return updated
 
-    async def withdraw(self, *, wallet_id: str, amount: Decimal) -> WalletRecord:
+    async def withdraw(
+        self, *, wallet_id: str, amount: Decimal, current_user_id: str
+    ) -> WalletRecord:
         """Debits `wallet_id` by `amount`.
 
         Unlike `deposit`, the amount alone cannot be validated before
         opening a transaction — checking for sufficient funds requires
-        first reading the wallet's current balance via Layer 4 — so
-        validation happens immediately after that read, still strictly
-        *before* the balance update or ledger append are attempted.
+        first reading the wallet's current balance via Layer 4.
+        Ownership is checked immediately after that same read, still
+        strictly *before* the amount validation, balance update, or
+        ledger append are attempted.
 
         Args:
             wallet_id: The wallet to debit.
             amount: The amount to withdraw.
+            current_user_id: The id of the authenticated caller.
 
         Returns:
             The wallet's `WalletRecord` after the withdrawal.
@@ -155,14 +178,15 @@ class WalletController:
         Raises:
             HTTPException: 422 for an invalid amount, 400 for
                 insufficient funds, 404 if `wallet_id` does not exist,
-                423 if the wallet is locked, or 409 on a concurrency
-                conflict.
+                403 if it does not belong to `current_user_id`, 423 if
+                the wallet is locked, or 409 on a concurrency conflict.
         """
         with self._translate_domain_errors():
             async with self._unit_of_work_factory() as uow:
                 wallet = self._require_wallet(
                     await uow.wallets.get_wallet_by_id(wallet_id), wallet_id
                 )
+                self._require_ownership(wallet, current_user_id)
                 self._wallet_service.ensure_wallet_is_unlocked(
                     wallet.id, wallet.is_locked
                 )
@@ -190,18 +214,26 @@ class WalletController:
         source_wallet_id: str,
         destination_wallet_id: str,
         amount: Decimal,
+        current_user_id: str,
     ) -> Tuple[WalletRecord, WalletRecord]:
         """Moves `amount` from `source_wallet_id` to
         `destination_wallet_id`.
 
-        Both wallets are validated (existence, lock status) and the
-        transfer amount is checked against the source's balance via
-        Layer 3, all before either wallet's balance is written.
+        Ownership is only enforced on the *source* wallet — the
+        authenticated caller must own the wallet funds leave, but
+        sending money *to* another user's wallet is the entire point
+        of a transfer, so the destination wallet is deliberately
+        exempt from the ownership check. Both wallets are still
+        validated for existence and lock status, and the transfer
+        amount is checked against the source's balance via Layer 3,
+        all before either wallet's balance is written.
 
         Args:
             source_wallet_id: The wallet the funds leave.
             destination_wallet_id: The wallet the funds arrive at.
             amount: The amount to transfer.
+            current_user_id: The id of the authenticated caller, who
+                must own `source_wallet_id`.
 
         Returns:
             A `(updated_source, updated_destination)` tuple.
@@ -209,7 +241,8 @@ class WalletController:
         Raises:
             HTTPException: 422 for an invalid amount, 400 for
                 insufficient funds, 404 if either wallet does not
-                exist, 423 if either wallet is locked, or 409 on a
+                exist, 403 if the caller does not own the source
+                wallet, 423 if either wallet is locked, or 409 on a
                 concurrency conflict.
         """
         with self._translate_domain_errors():
@@ -218,6 +251,7 @@ class WalletController:
                     await uow.wallets.get_wallet_by_id(source_wallet_id),
                     source_wallet_id,
                 )
+                self._require_ownership(source, current_user_id)
                 destination = self._require_wallet(
                     await uow.wallets.get_wallet_by_id(destination_wallet_id),
                     destination_wallet_id,
@@ -302,6 +336,23 @@ class WalletController:
         if wallet is None:
             raise WalletNotFoundError(wallet_id)
         return wallet
+
+    @staticmethod
+    def _require_ownership(wallet: WalletRecord, current_user_id: str) -> None:
+        """Raises `HTTPException(403)` unless `wallet` belongs to
+        `current_user_id` — the sole ownership gate every
+        wallet-reading or wallet-mutating operation passes through.
+
+        Deliberately raises `HTTPException` directly rather than a
+        Layer 3/4 domain exception translated by
+        `_translate_domain_errors`: ownership is an authorization
+        concern that belongs entirely to Layer 2, not a business rule
+        Layers 3/4 have any opinion about.
+        """
+        if wallet.user_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
+            )
 
     @staticmethod
     @contextmanager

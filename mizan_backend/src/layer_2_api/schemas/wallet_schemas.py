@@ -83,7 +83,7 @@ class WalletBalanceResponse(BaseModel):
     """Response body for `GET /wallet/{wallet_id}/balance`."""
 
     wallet_id: str
-    owner_id: str
+    user_id: str
     currency: str
     balance: Decimal
     is_locked: bool

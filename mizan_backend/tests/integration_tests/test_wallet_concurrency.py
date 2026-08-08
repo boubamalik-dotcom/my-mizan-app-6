@@ -82,6 +82,30 @@ def wallet_service() -> WalletService:
     return WalletService()
 
 
+async def _create_user(session_factory: async_sessionmaker, *, email: str) -> str:
+    """Creates a user via the real `UnitOfWork`/`UserRepository` path
+    and returns its id — `WalletModel.user_id` is a real foreign key
+    into `users.id`, enforced by Postgres just as strictly as by
+    SQLite (`db_config.build_engine` turns on `PRAGMA foreign_keys` for
+    SQLite specifically to match)."""
+    async with UnitOfWork(session_factory) as uow:
+        user = await uow.users.create_user(
+            email=email, hashed_password="hashed", full_name="Test User"
+        )
+        await uow.commit()
+    return user.id
+
+
+@pytest_asyncio.fixture
+async def user_id(session_factory: async_sessionmaker) -> str:
+    return await _create_user(session_factory, email="alice@example.com")
+
+
+@pytest_asyncio.fixture
+async def other_user_id(session_factory: async_sessionmaker) -> str:
+    return await _create_user(session_factory, email="bob@example.com")
+
+
 async def _deposit_with_retry(
     session_factory: async_sessionmaker,
     wallet_service: WalletService,
@@ -153,7 +177,7 @@ async def _withdraw_with_retry(
 
 
 async def test_concurrent_deposits_never_lose_an_update(
-    session_factory: async_sessionmaker, wallet_service: WalletService
+    session_factory: async_sessionmaker, wallet_service: WalletService, user_id: str
 ) -> None:
     """20 concurrent tasks, each depositing 10.00 into the *same*
     wallet via genuinely independent database connections. Without
@@ -162,7 +186,7 @@ async def test_concurrent_deposits_never_lose_an_update(
     landing on a final balance less than the true sum. With it, every
     single deposit is guaranteed to be reflected."""
     async with UnitOfWork(session_factory) as uow:
-        wallet = await uow.wallets.create_wallet(owner_id="alice", currency="USD")
+        wallet = await uow.wallets.create_wallet(user_id=user_id, currency="USD")
         await uow.commit()
 
     deposit_amount = Decimal("10.00")
@@ -182,7 +206,7 @@ async def test_concurrent_deposits_never_lose_an_update(
 
 
 async def test_concurrent_withdrawals_never_overdraw(
-    session_factory: async_sessionmaker, wallet_service: WalletService
+    session_factory: async_sessionmaker, wallet_service: WalletService, user_id: str
 ) -> None:
     """20 concurrent withdrawal attempts of 30.00 each against a
     wallet that only holds 100.00 — enough funds for exactly 3 to
@@ -195,7 +219,7 @@ async def test_concurrent_withdrawals_never_overdraw(
     expected_successes = int(initial_balance // withdrawal_amount)  # 3
 
     async with UnitOfWork(session_factory) as uow:
-        wallet = await uow.wallets.create_wallet(owner_id="alice", currency="USD")
+        wallet = await uow.wallets.create_wallet(user_id=user_id, currency="USD")
         await uow.wallets.update_wallet_balance(
             wallet.id, initial_balance, expected_version=wallet.version
         )
@@ -221,7 +245,10 @@ async def test_concurrent_withdrawals_never_overdraw(
 
 
 async def test_concurrent_transfers_conserve_total_funds_across_two_wallets(
-    session_factory: async_sessionmaker, wallet_service: WalletService
+    session_factory: async_sessionmaker,
+    wallet_service: WalletService,
+    user_id: str,
+    other_user_id: str,
 ) -> None:
     """10 concurrent transfers of 5.00 from wallet A to wallet B, and
     10 concurrent transfers of 5.00 in the *opposite* direction (B to
@@ -296,8 +323,8 @@ async def test_concurrent_transfers_conserve_total_funds_across_two_wallets(
         raise AssertionError(f"Exceeded {MAX_RETRIES} retries for a transfer.")
 
     async with UnitOfWork(session_factory) as uow:
-        wallet_a = await uow.wallets.create_wallet(owner_id="alice", currency="USD")
-        wallet_b = await uow.wallets.create_wallet(owner_id="bob", currency="USD")
+        wallet_a = await uow.wallets.create_wallet(user_id=user_id, currency="USD")
+        wallet_b = await uow.wallets.create_wallet(user_id=other_user_id, currency="USD")
         await uow.wallets.update_wallet_balance(
             wallet_a.id, Decimal("100.00"), expected_version=wallet_a.version
         )

@@ -52,6 +52,22 @@ class UnitOfWork:
             )
             await uow.commit()
 
+    Because `self.users` and `self.wallets` share the same session,
+    creating a wallet for a just-created (or already-existing) user is
+    itself a single atomic operation spanning both repositories::
+
+        async with UnitOfWork() as uow:
+            user = await uow.users.get_user_by_email(email)
+            wallet = await uow.wallets.create_wallet(
+                user_id=user.id, currency="USD"
+            )
+            await uow.commit()
+
+    `WalletModel.user_id` is a real foreign key into `users.id`, so
+    attempting this with a `user_id` that does not correspond to an
+    existing row fails loudly (`IntegrityError`) rather than silently
+    creating an orphaned wallet.
+
     If the ``async with`` block exits because of an unhandled
     exception, `__aexit__` rolls the transaction back automatically —
     so a failure partway through (e.g. `append_ledger_entry` raising

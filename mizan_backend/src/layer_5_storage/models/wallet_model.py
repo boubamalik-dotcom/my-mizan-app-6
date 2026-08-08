@@ -24,7 +24,15 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base_model import Base, TimestampMixin, generate_uuid
@@ -39,7 +47,16 @@ MONEY_SCALE = 4
 
 
 class WalletModel(Base, TimestampMixin):
-    """A single owner's balance in a single currency.
+    """A single user's balance in a single currency.
+
+    ``user_id`` is a real foreign key into ``users.id`` — every wallet
+    is owned by exactly one registered account, which is what lets
+    `WalletController` enforce "you may only act on your own wallet"
+    (see `layer_2_api/controllers/wallet_controller.py`). This module
+    deliberately does not import `UserModel` (only its table/column
+    name as a string), so `wallet_model.py` and `user_model.py` never
+    need to know about each other directly, avoiding a circular
+    import between two sibling Layer 5 modules.
 
     ``is_locked`` mirrors the boolean flag
     `layer_3_business.wallet.wallet_service.WalletService
@@ -51,7 +68,7 @@ class WalletModel(Base, TimestampMixin):
 
     __tablename__ = "wallets"
     __table_args__ = (
-        UniqueConstraint("owner_id", "currency", name="uq_wallet_owner_currency"),
+        UniqueConstraint("user_id", "currency", name="uq_wallet_user_currency"),
         CheckConstraint("balance >= 0", name="ck_wallet_balance_non_negative"),
         CheckConstraint("version >= 0", name="ck_wallet_version_non_negative"),
     )
@@ -59,7 +76,9 @@ class WalletModel(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=generate_uuid
     )
-    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     balance: Mapped[Decimal] = mapped_column(
         Numeric(MONEY_PRECISION, MONEY_SCALE), nullable=False, default=Decimal("0")
@@ -77,7 +96,7 @@ class WalletModel(Base, TimestampMixin):
         """Compact representation for logs/debuggers, not part of any
         public API contract."""
         return (
-            f"WalletModel(id={self.id!r}, owner_id={self.owner_id!r}, "
+            f"WalletModel(id={self.id!r}, user_id={self.user_id!r}, "
             f"currency={self.currency!r}, balance={self.balance!r}, "
             f"version={self.version!r})"
         )
