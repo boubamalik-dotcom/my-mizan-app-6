@@ -184,16 +184,6 @@ class Settings(BaseSettings):
             )
 
 
-@lru_cache
-def _ephemeral_development_secret() -> str:
-    """A random signing key for this process only.
-
-    Cached so every caller within one process agrees on it — otherwise
-    a token would fail to verify against the very service that issued
-    it.
-    """
-    return secrets.token_hex(32)
-
     # Authorization — role bootstrap
     #: Emails that receive the `admin` role when they register.
     #:
@@ -230,3 +220,14 @@ def get_settings() -> Settings:
     different environment.
     """
     return Settings()
+
+
+@lru_cache
+def _ephemeral_development_secret() -> str:
+    """A random signing key for this process only.
+
+    Cached so every caller within one process agrees on it — otherwise
+    a token would fail to verify against the very service that issued
+    it.
+    """
+    return secrets.token_hex(32)

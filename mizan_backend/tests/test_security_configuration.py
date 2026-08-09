@@ -150,3 +150,50 @@ class TestRateLimitDefaults:
             settings.register_rate_limit_attempts
             > settings.login_rate_limit_attempts
         )
+
+
+class TestTheCompositionRootCanActuallyRead:
+    """Guards a gap the test suite had.
+
+    Every test builds its own FastAPI app and injects controllers
+    directly, so nothing exercised `main.py`. When a config edit
+    accidentally moved fields out of the `Settings` class body, the full
+    suite still passed and only the running server failed — at startup,
+    with an `AttributeError`.
+
+    These assert that the settings `main.py` reads actually exist.
+    """
+
+    def test_every_setting_the_composition_root_reads_exists(self) -> None:
+        import ast
+        from pathlib import Path
+
+        source = Path(__file__).resolve().parents[1] / "main.py"
+        tree = ast.parse(source.read_text())
+
+        read = {
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "settings"
+        }
+        assert read, "found no settings reads; has main.py been restructured?"
+
+        settings = _settings()
+        missing = [name for name in sorted(read) if not hasattr(settings, name)]
+        assert not missing, f"main.py reads settings that do not exist: {missing}"
+
+    def test_the_app_can_be_constructed(self) -> None:
+        # Exercises `create_app`, including `validate_for_startup` and
+        # the CORS middleware, which no other test touches.
+        from fastapi import FastAPI
+
+        import main
+
+        app = main.create_app()
+
+        assert isinstance(app, FastAPI)
+        assert any(
+            "CORSMiddleware" in str(middleware.cls) for middleware in app.user_middleware
+        ), "CORS middleware is not installed"
