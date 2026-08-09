@@ -31,6 +31,7 @@ from ...layer_3_business.queue.exceptions import (
     ReservationNotActiveError,
 )
 from ...layer_4_data_access.repositories.queue_repository import (
+    AdvanceOutcome,
     ClinicNotFoundError,
     ClinicQueueRecord,
     QueueAdvanceRecord,
@@ -39,6 +40,7 @@ from ...layer_4_data_access.repositories.queue_repository import (
     TicketNumberCollisionError,
 )
 from ...layer_4_data_access.uow.transaction_manager import UnitOfWork
+from ..realtime.queue_broadcaster import QueueBroadcaster
 
 
 class QueueController:
@@ -49,6 +51,7 @@ class QueueController:
         self,
         *,
         unit_of_work_factory: Callable[[], UnitOfWork] = UnitOfWork,
+        broadcaster: Optional[QueueBroadcaster] = None,
     ) -> None:
         """
         Args:
@@ -57,6 +60,11 @@ class QueueController:
                 invoked. Defaults to the `UnitOfWork` class itself.
                 Injected so tests can point every unit of work this
                 controller opens at an isolated test database.
+            broadcaster: Publishes queue updates to subscribed
+                WebSockets. Optional: without one every endpoint still
+                works exactly as before and clients simply refresh, so
+                a test (or a deployment with no Redis) is not forced to
+                stand up messaging to take a reservation.
 
         Note there is no `queue_service` parameter, unlike
         `WalletController`. The Layer 3 rules are consulted from inside
@@ -65,6 +73,7 @@ class QueueController:
         here would have nothing left to decide.
         """
         self._unit_of_work_factory = unit_of_work_factory
+        self._broadcaster = broadcaster
 
     # -- Reads ------------------------------------------------------------
 
@@ -124,8 +133,14 @@ class QueueController:
                 reservation = await uow.queues.join_queue(
                     clinic_id=clinic_id, user_id=current_user_id
                 )
+                # Read inside the transaction, while the clinic row lock
+                # this join took is still held, so the figures announced
+                # are exactly the ones this commit produced and cannot
+                # have been overtaken by another join in between.
+                queue = await uow.queues.get_clinic_queue_status(clinic_id)
                 await uow.commit()
 
+        await self._announce(queue)
         return reservation
 
     async def advance_queue(self, *, clinic_id: str) -> QueueAdvanceRecord:
@@ -159,6 +174,11 @@ class QueueController:
                 advance = await uow.queues.advance_clinic_queue(clinic_id)
                 await uow.commit()
 
+        # Nothing changed on an empty queue, so there is nothing to
+        # announce; telling subscribers the queue moved when it did not
+        # would make every idle button press look like activity.
+        if advance.outcome is not AdvanceOutcome.QUEUE_EMPTY:
+            await self._announce(advance.queue)
         return advance
 
     async def cancel_reservation(
@@ -192,11 +212,30 @@ class QueueController:
                 self._require_ownership(existing, current_user_id)
 
                 reservation = await uow.queues.cancel_reservation(reservation_id)
+                queue = await uow.queues.get_clinic_queue_status(
+                    reservation.clinic_id
+                )
                 await uow.commit()
 
+        await self._announce(queue)
         return reservation
 
     # -- Internal helpers -------------------------------------------------
+
+    async def _announce(self, queue: ClinicQueueRecord) -> None:
+        """Broadcasts a clinic's new queue state to its subscribers.
+
+        Called **after** the commit, never before: a subscriber told
+        about a state that then rolled back would be showing a queue
+        that never existed, and no later event would correct it.
+
+        A deployment without a broadcaster simply skips this; the
+        endpoints behave exactly as they did before real-time updates,
+        with clients refreshing.
+        """
+        if self._broadcaster is None:
+            return
+        await self._broadcaster.publish_queue_state(queue)
 
     @staticmethod
     def _require_ownership(

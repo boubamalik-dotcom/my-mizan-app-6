@@ -22,6 +22,7 @@ from src.layer_2_api.controllers.chat_controller import ChatController
 from src.layer_2_api.controllers.queue_controller import QueueController
 from src.layer_2_api.controllers.wallet_controller import WalletController
 from src.layer_2_api.main_router import api_router
+from src.layer_2_api.realtime.queue_broadcaster import QueueBroadcaster
 from src.layer_3_business.audit.audit_service import AuditService
 from src.layer_3_business.auth.auth_service import AuthService
 from src.layer_3_business.chat.chat_service import ChatService, MessageRateLimiter
@@ -109,10 +110,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         unit_of_work_factory=UnitOfWork,
     )
 
+    # Shares the chat engine's Redis broker rather than opening a
+    # second one: both features need the same cross-process fan-out,
+    # and channel names are namespaced (`queue:{clinic_id}`) so their
+    # traffic cannot collide.
+    queue_broadcaster = QueueBroadcaster(broker=message_broker)
+
     # No Layer 3 service injected, unlike the wallet: the queue's rules
     # all have to run inside the clinic row lock, so they are consulted
     # from `QueueRepository.join_queue` instead.
-    queue_controller = QueueController(unit_of_work_factory=UnitOfWork)
+    queue_controller = QueueController(
+        unit_of_work_factory=UnitOfWork, broadcaster=queue_broadcaster
+    )
 
     app.state.message_broker = message_broker
     app.state.chat_controller = chat_controller
@@ -120,6 +129,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.auth_controller = auth_controller
     app.state.audit_controller = audit_controller
     app.state.queue_controller = queue_controller
+    app.state.queue_broadcaster = queue_broadcaster
     # Exposed separately (not just via `auth_controller`) so the Chat
     # WebSocket route can validate a `?token=` query parameter without
     # a database round trip — see
@@ -134,6 +144,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await chat_controller.shutdown()
+        # Before the broker it subscribes through is disconnected.
+        await queue_broadcaster.shutdown()
         await message_broker.disconnect()
         await token_blocklist.disconnect()
         await rate_limiter.disconnect()

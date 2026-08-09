@@ -251,6 +251,28 @@ class QueueRepository:
             for clinic, count, now_serving in result.all()
         ]
 
+    async def get_clinic_queue_status(self, clinic_id: str) -> ClinicQueueRecord:
+        """The queue figures for one clinic.
+
+        The single-clinic read `get_clinics_with_queue_status` does for
+        all of them, for a caller that has just changed one queue and
+        needs to announce its new state without re-reading every other
+        clinic in the country.
+
+        Args:
+            clinic_id: The clinic to describe.
+
+        Returns:
+            Its current `ClinicQueueRecord`.
+
+        Raises:
+            ClinicNotFoundError: If `clinic_id` does not exist.
+        """
+        clinic = await self._session.get(ClinicModel, clinic_id)
+        if clinic is None:
+            raise ClinicNotFoundError(clinic_id)
+        return await self._clinic_queue_snapshot(clinic)
+
     async def get_active_reservation_for_user(
         self, user_id: str
     ) -> Optional[ReservationRecord]:

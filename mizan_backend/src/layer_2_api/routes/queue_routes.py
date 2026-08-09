@@ -14,7 +14,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, status
+from uuid import uuid4
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 
 from ...layer_4_data_access.repositories.queue_repository import (
     ClinicQueueRecord,
@@ -22,12 +32,14 @@ from ...layer_4_data_access.repositories.queue_repository import (
 )
 from ...layer_4_data_access.repositories.user_repository import UserRecord
 from ...layer_3_business.authz.roles import Permission
+from ..auth.auth_controller import AuthController
 from ..auth.deps import (
     get_current_user,
     get_current_user_or_none,
     require_permission,
 )
 from ..controllers.queue_controller import QueueController
+from ..realtime.queue_broadcaster import QueueBroadcaster
 from ..schemas.queue_schemas import (
     AdvanceQueueResponse,
     ClinicQueueResponse,
@@ -234,6 +246,98 @@ async def advance_queue(
         ),
         queue=_to_queue_response(advance.queue),
     )
+
+
+def get_queue_broadcaster_ws(websocket: WebSocket) -> QueueBroadcaster:
+    """Resolves the app-wide `QueueBroadcaster` for a WebSocket route.
+
+    A separate resolver from the HTTP one because a WebSocket handler
+    receives a `WebSocket`, not a `Request`; both reach the same
+    singleton on `app.state`.
+    """
+    return websocket.app.state.queue_broadcaster
+
+
+def get_auth_controller_ws(websocket: WebSocket) -> AuthController:
+    """The auth controller, for the same reason."""
+    return websocket.app.state.auth_controller
+
+
+@router.websocket("/ws/{clinic_id}")
+async def queue_websocket(
+    websocket: WebSocket,
+    clinic_id: str,
+    token: str | None = Query(
+        default=None,
+        description=(
+            "JWT access token issued by POST /auth/login, e.g. "
+            "ws://.../api/v1/queues/ws/{clinic_id}?token=.... Required — "
+            "standard WebSocket APIs cannot send an Authorization header."
+        ),
+    ),
+    broadcaster: QueueBroadcaster = Depends(get_queue_broadcaster_ws),
+    auth_controller: AuthController = Depends(get_auth_controller_ws),
+) -> None:
+    """Live updates for one clinic's queue.
+
+    The server pushes a frame whenever the clinic's queue changes —
+    someone joins, someone cancels, or reception calls the next
+    patient::
+
+        {
+          "event": "queue_updated",
+          "clinic_id": "...",
+          "waiting_count": 3,
+          "now_serving_ticket": 7,
+          "is_accepting_patients": true,
+          "average_service_minutes": 8,
+          "estimated_wait_minutes": 24
+        }
+
+    **The frame carries no patient information at all** — no names, no
+    ids, nothing about who is in the queue. A client that needs its own
+    position asks `GET /api/v1/queues` with its token; the socket only
+    ever says that this clinic's queue moved. That is a deliberate
+    constraint, not an omission: a live stream of who is sitting in
+    which clinic, at a clinic whose specialty implies why, is a medical
+    privacy breach however convenient the payload would be.
+
+    Authentication is required even though the same figures are
+    readable anonymously over REST. Reading is a request that ends; a
+    socket is a resource held open, and this bounds who can hold one.
+
+    Nothing is expected from the client. Frames it sends are ignored;
+    the receive loop exists only to notice the connection closing.
+    """
+    if not token:
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required."
+        )
+        return
+
+    user = await auth_controller.resolve_user_or_none(token)
+    if user is None:
+        # Closed before accepting, so a rejected client cannot tell our
+        # refusal apart from a server that never saw the request.
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION, reason="Invalid or expired token."
+        )
+        return
+
+    # One registration per socket, not per user: the same patient may
+    # legitimately have the queue open on a phone and a laptop, and a
+    # second tab must not silently evict the first.
+    client_id = f"{user.id}:{uuid4().hex}"
+    await broadcaster.connect(
+        clinic_id=clinic_id, client_id=client_id, websocket=websocket
+    )
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await broadcaster.disconnect(clinic_id=clinic_id, client_id=client_id)
 
 
 @router.delete(
