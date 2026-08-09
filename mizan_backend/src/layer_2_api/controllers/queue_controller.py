@@ -33,6 +33,7 @@ from ...layer_3_business.queue.exceptions import (
 from ...layer_4_data_access.repositories.queue_repository import (
     ClinicNotFoundError,
     ClinicQueueRecord,
+    QueueAdvanceRecord,
     ReservationNotFoundError,
     ReservationRecord,
     TicketNumberCollisionError,
@@ -126,6 +127,39 @@ class QueueController:
                 await uow.commit()
 
         return reservation
+
+    async def advance_queue(self, *, clinic_id: str) -> QueueAdvanceRecord:
+        """Calls the next patient in `clinic_id`'s queue.
+
+        A clinic-side operation, so there is no `current_user_id` to
+        own anything: authorization is by **capability**, enforced by
+        the `require_permission(Permission.QUEUE_ADVANCE)` guard on the
+        route before this method is reached. Patients hold no such
+        permission, which is the point — a patient who could advance
+        the queue could serve themselves to the front of it.
+
+        The whole transition happens inside one `UnitOfWork`, so the
+        row lock `advance_clinic_queue` takes is held from the moment
+        it reads the front of the line until the commit. Committing
+        unconditionally is safe: an advance that found nothing to do
+        wrote nothing, so the commit is a no-op rather than a change
+        nobody asked for.
+
+        Args:
+            clinic_id: The clinic whose queue to advance.
+
+        Returns:
+            What happened, plus the clinic's queue afterwards.
+
+        Raises:
+            HTTPException: 404 if the clinic does not exist.
+        """
+        with self._translate_domain_errors():
+            async with self._unit_of_work_factory() as uow:
+                advance = await uow.queues.advance_clinic_queue(clinic_id)
+                await uow.commit()
+
+        return advance
 
     async def cancel_reservation(
         self, *, reservation_id: str, current_user_id: str

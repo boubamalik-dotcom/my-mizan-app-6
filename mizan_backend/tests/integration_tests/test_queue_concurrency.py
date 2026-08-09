@@ -21,6 +21,7 @@ concurrency test that would pass against broken code proves nothing.
 from __future__ import annotations
 
 import asyncio
+import collections
 import os
 from typing import AsyncIterator
 
@@ -32,10 +33,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from src.layer_3_business.queue.exceptions import AlreadyInQueueError
+from src.layer_3_business.queue.queue_service import AdvanceOutcome
 from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.db_config import build_engine, build_session_factory
-from src.layer_5_storage.models.queue_model import ReservationModel
+from src.layer_5_storage.models.queue_model import ReservationModel, ReservationStatus
 
 QUEUE_TEST_DATABASE_URL = os.environ.get(
     "QUEUE_TEST_DATABASE_URL",
@@ -244,6 +246,143 @@ class TestDifferentClinicsDoNotBlockEachOther:
 
         # Five clinics, five patients each, each numbered from one.
         assert sorted(tickets) == sorted([1, 2, 3, 4, 5] * 5)
+
+
+class TestSimultaneousAdvancesDoNotLoseClicks:
+    """Two receptionists pressing "call next patient" at the same
+    instant.
+
+    The failure this guards against is not corruption but *silence*:
+    without the clinic row lock, both transactions read the same "next
+    waiting" row and both promote it, so two clicks advance the queue
+    by one patient and the second click vanishes. The clinician presses
+    again, nothing appears to happen, and the room waits. Measured on
+    the unlocked implementation in
+    `cursor/mizan-door-backend-setup-1fc8`, three simultaneous clicks
+    produced exactly one promotion.
+    """
+
+    @staticmethod
+    async def _advance(session_factory: async_sessionmaker, clinic_id: str):
+        async with UnitOfWork(session_factory) as uow:
+            advance = await uow.queues.advance_clinic_queue(clinic_id)
+            await uow.commit()
+        return advance
+
+    async def test_each_click_calls_a_different_patient(
+        self,
+        session_factory: async_sessionmaker,
+        clinic_id: str,
+        patient_ids: list[str],
+    ) -> None:
+        for patient_id in patient_ids[:5]:
+            await _join(session_factory, clinic_id, patient_id)
+
+        advances = await asyncio.gather(
+            *(self._advance(session_factory, clinic_id) for _ in range(5))
+        )
+
+        called = [a.now_serving.ticket_number for a in advances if a.now_serving]
+        assert sorted(called) == [1, 2, 3, 4, 5], f"clicks were lost: {called}"
+
+    async def test_no_patient_is_called_twice(
+        self,
+        session_factory: async_sessionmaker,
+        clinic_id: str,
+        patient_ids: list[str],
+    ) -> None:
+        for patient_id in patient_ids[:5]:
+            await _join(session_factory, clinic_id, patient_id)
+
+        advances = await asyncio.gather(
+            *(self._advance(session_factory, clinic_id) for _ in range(5))
+        )
+
+        called = [a.now_serving.id for a in advances if a.now_serving]
+        assert len(set(called)) == len(called)
+
+    async def test_exactly_one_patient_ends_up_in_the_room(
+        self,
+        session_factory: async_sessionmaker,
+        clinic_id: str,
+        patient_ids: list[str],
+    ) -> None:
+        # Two patients called into one room at once is the visible,
+        # embarrassing version of this bug.
+        for patient_id in patient_ids[:8]:
+            await _join(session_factory, clinic_id, patient_id)
+
+        await asyncio.gather(
+            *(self._advance(session_factory, clinic_id) for _ in range(6))
+        )
+
+        async with session_factory() as session:
+            in_room = await session.scalar(
+                select(func.count(ReservationModel.id)).where(
+                    ReservationModel.clinic_id == clinic_id,
+                    ReservationModel.status == ReservationStatus.IN_CONSULTATION,
+                )
+            )
+            served = await session.scalar(
+                select(func.count(ReservationModel.id)).where(
+                    ReservationModel.clinic_id == clinic_id,
+                    ReservationModel.status == ReservationStatus.SERVED,
+                )
+            )
+
+        assert in_room == 1
+        # Six clicks: five completed, the sixth is still being seen.
+        assert served == 5
+
+    async def test_more_clicks_than_patients_is_harmless(
+        self,
+        session_factory: async_sessionmaker,
+        clinic_id: str,
+        patient_ids: list[str],
+    ) -> None:
+        for patient_id in patient_ids[:3]:
+            await _join(session_factory, clinic_id, patient_id)
+
+        advances = await asyncio.gather(
+            *(self._advance(session_factory, clinic_id) for _ in range(10))
+        )
+
+        outcomes = collections.Counter(a.outcome for a in advances)
+        assert outcomes[AdvanceOutcome.CALLED_NEXT] == 3
+        assert outcomes[AdvanceOutcome.COMPLETED_LAST] == 1
+        assert outcomes[AdvanceOutcome.QUEUE_EMPTY] == 6
+
+    async def test_advancing_and_joining_at_once_stays_consistent(
+        self,
+        session_factory: async_sessionmaker,
+        clinic_id: str,
+        patient_ids: list[str],
+    ) -> None:
+        # The lock is shared with `join_queue`, so a patient arriving in
+        # the same instant as a call cannot slip between reading the
+        # front of the line and promoting it.
+        await _join(session_factory, clinic_id, patient_ids[0])
+
+        await asyncio.gather(
+            *(_join(session_factory, clinic_id, p) for p in patient_ids[1:6]),
+            *(self._advance(session_factory, clinic_id) for _ in range(3)),
+        )
+
+        async with session_factory() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(
+                            ReservationModel.position, ReservationModel.status
+                        ).where(ReservationModel.clinic_id == clinic_id)
+                    )
+                ).all()
+            )
+
+        positions = [p for p, _ in rows]
+        assert len(set(positions)) == len(positions), "duplicate tickets"
+        in_room = [p for p, s in rows if s is ReservationStatus.IN_CONSULTATION]
+        assert len(in_room) <= 1, f"more than one patient in the room: {in_room}"
 
 
 class TestTheRaceIsReal:

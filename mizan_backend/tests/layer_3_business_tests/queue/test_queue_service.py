@@ -13,7 +13,7 @@ from src.layer_3_business.queue.exceptions import (
     QueueDomainError,
     ReservationNotActiveError,
 )
-from src.layer_3_business.queue.queue_service import QueueService
+from src.layer_3_business.queue.queue_service import AdvanceOutcome, QueueService
 
 
 @pytest.fixture
@@ -162,6 +162,84 @@ class TestReservationActivityRule:
             service.ensure_reservation_is_active(
                 reservation_id="r1", status="cancelled", active_statuses=self.ACTIVE
             )
+
+
+class TestClassifyAdvance:
+    def test_calling_next_with_someone_waiting(self, service: QueueService) -> None:
+        assert (
+            service.classify_advance(
+                had_patient_in_consultation=True, has_next_waiting=True
+            )
+            is AdvanceOutcome.CALLED_NEXT
+        )
+
+    def test_the_first_call_of_the_day_has_nobody_to_complete(
+        self, service: QueueService
+    ) -> None:
+        # Nobody in the room yet, but people waiting: still a normal
+        # call, not a special case.
+        assert (
+            service.classify_advance(
+                had_patient_in_consultation=False, has_next_waiting=True
+            )
+            is AdvanceOutcome.CALLED_NEXT
+        )
+
+    def test_finishing_the_last_patient_empties_the_queue(
+        self, service: QueueService
+    ) -> None:
+        assert (
+            service.classify_advance(
+                had_patient_in_consultation=True, has_next_waiting=False
+            )
+            is AdvanceOutcome.COMPLETED_LAST
+        )
+
+    def test_an_empty_queue_reports_that_nothing_happened(
+        self, service: QueueService
+    ) -> None:
+        assert (
+            service.classify_advance(
+                had_patient_in_consultation=False, has_next_waiting=False
+            )
+            is AdvanceOutcome.QUEUE_EMPTY
+        )
+
+    def test_advancing_an_empty_queue_is_not_an_error(
+        self, service: QueueService
+    ) -> None:
+        # A receptionist tapping the button on an empty queue has not
+        # done anything wrong; answering with a failure would train
+        # them to ignore failures.
+        service.classify_advance(
+            had_patient_in_consultation=False, has_next_waiting=False
+        )
+
+    def test_the_two_kinds_of_nothing_called_are_distinguishable(
+        self, service: QueueService
+    ) -> None:
+        # "The last patient just left" and "there was never anyone
+        # here" are different facts for the clinician.
+        finished = service.classify_advance(
+            had_patient_in_consultation=True, has_next_waiting=False
+        )
+        never_anyone = service.classify_advance(
+            had_patient_in_consultation=False, has_next_waiting=False
+        )
+        assert finished is not never_anyone
+
+    @pytest.mark.parametrize(
+        ("outcome", "changed"),
+        [
+            (AdvanceOutcome.CALLED_NEXT, True),
+            (AdvanceOutcome.COMPLETED_LAST, True),
+            (AdvanceOutcome.QUEUE_EMPTY, False),
+        ],
+    )
+    def test_only_a_real_advance_counts_as_a_change(
+        self, service: QueueService, outcome: AdvanceOutcome, changed: bool
+    ) -> None:
+        assert service.advance_changed_the_queue(outcome) is changed
 
 
 class TestExceptionHierarchy:

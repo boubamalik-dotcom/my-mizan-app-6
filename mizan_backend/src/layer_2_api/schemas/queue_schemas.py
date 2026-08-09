@@ -55,8 +55,16 @@ class ClinicQueueResponse(BaseModel):
 
     clinic: ClinicResponse
     waiting_count: int = Field(
-        description="Active tickets held right now — the number of people "
-        "who would be ahead of someone joining at this moment."
+        description="Tickets still to be called. Excludes whoever is "
+        "already with the clinician — see `now_serving_ticket` — so "
+        "this means 'people yet to be seen' rather than lumping the two "
+        "together."
+    )
+    now_serving_ticket: int | None = Field(
+        default=None,
+        description="The ticket currently with the clinician, or null "
+        "when the room is free. This is the 'now serving 42' figure a "
+        "waiting-room display shows.",
     )
     average_service_minutes: int = Field(
         description="Minutes this clinic currently takes per patient "
@@ -112,6 +120,39 @@ class ReservationResponse(BaseModel):
             }
         }
     }
+
+
+class AdvanceQueueResponse(BaseModel):
+    """The result of `POST /queues/{clinic_id}/next`.
+
+    Reports both sides of the transition rather than just the new
+    arrival: a dashboard that only learned who was called could not
+    tell whether the previous consultation finished or was skipped, and
+    a clinician pressing the button needs to see that the person who
+    just left was actually recorded as seen.
+    """
+
+    outcome: str = Field(
+        description=(
+            "`called_next` — a patient was called in (any previous "
+            "consultation was completed).\n\n"
+            "`completed_last` — the patient in the room was completed "
+            "and nobody was waiting; the queue is now empty.\n\n"
+            "`queue_empty` — nobody was in the room and nobody was "
+            "waiting, so nothing changed. Not an error: pressing the "
+            "button on an empty queue is not a mistake."
+        )
+    )
+    now_serving: ReservationResponse | None = Field(
+        default=None, description="The patient just called in, if any."
+    )
+    completed: ReservationResponse | None = Field(
+        default=None,
+        description="The patient whose consultation was just completed, if any.",
+    )
+    queue: ClinicQueueResponse = Field(
+        description="The clinic's queue as it stands after the advance."
+    )
 
 
 class QueueListResponse(BaseModel):

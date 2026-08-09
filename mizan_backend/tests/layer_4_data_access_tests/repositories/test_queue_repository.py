@@ -24,6 +24,7 @@ from src.layer_3_business.queue.exceptions import (
     ReservationNotActiveError,
 )
 from src.layer_4_data_access.repositories.queue_repository import (
+    AdvanceOutcome,
     ClinicNotFoundError,
     QueueRepository,
     ReservationNotFoundError,
@@ -425,6 +426,217 @@ class TestCancelling:
     ) -> None:
         with pytest.raises(ReservationNotFoundError):
             await repository.cancel_reservation("no-such-reservation")
+
+
+class TestAdvancingTheQueue:
+    async def test_calls_the_lowest_outstanding_ticket(
+        self,
+        repository: QueueRepository,
+        clinic_id: str,
+        patient_id: str,
+        other_patient_id: str,
+    ) -> None:
+        first = await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        await repository.join_queue(clinic_id=clinic_id, user_id=other_patient_id)
+
+        advance = await repository.advance_clinic_queue(clinic_id)
+
+        assert advance.outcome is AdvanceOutcome.CALLED_NEXT
+        assert advance.now_serving is not None
+        assert advance.now_serving.id == first.id
+        assert advance.now_serving.status is ReservationStatus.IN_CONSULTATION
+
+    async def test_the_first_call_completes_nobody(
+        self, repository: QueueRepository, clinic_id: str, patient_id: str
+    ) -> None:
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+
+        advance = await repository.advance_clinic_queue(clinic_id)
+
+        assert advance.completed is None
+
+    async def test_the_next_call_serves_the_patient_in_the_room(
+        self,
+        repository: QueueRepository,
+        clinic_id: str,
+        patient_id: str,
+        other_patient_id: str,
+    ) -> None:
+        first = await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        second = await repository.join_queue(
+            clinic_id=clinic_id, user_id=other_patient_id
+        )
+        await repository.advance_clinic_queue(clinic_id)
+
+        advance = await repository.advance_clinic_queue(clinic_id)
+
+        assert advance.completed is not None
+        assert advance.completed.id == first.id
+        assert advance.completed.status is ReservationStatus.SERVED
+        assert advance.now_serving is not None
+        assert advance.now_serving.id == second.id
+
+    async def test_records_when_the_patient_was_called_and_completed(
+        self, repository: QueueRepository, clinic_id: str, patient_id: str
+    ) -> None:
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+
+        called = (await repository.advance_clinic_queue(clinic_id)).now_serving
+        assert called is not None and called.called_at is not None
+        assert called.completed_at is None
+
+        served = (await repository.advance_clinic_queue(clinic_id)).completed
+        assert served is not None and served.completed_at is not None
+        # The pair is what makes a consultation's duration measurable.
+        assert served.called_at is not None
+        assert served.completed_at >= served.called_at
+
+    async def test_finishing_the_last_patient_empties_the_queue(
+        self, repository: QueueRepository, clinic_id: str, patient_id: str
+    ) -> None:
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        await repository.advance_clinic_queue(clinic_id)
+
+        advance = await repository.advance_clinic_queue(clinic_id)
+
+        assert advance.outcome is AdvanceOutcome.COMPLETED_LAST
+        assert advance.now_serving is None
+        assert advance.completed is not None
+        assert advance.queue.waiting_count == 0
+        assert advance.queue.now_serving_ticket is None
+
+    async def test_advancing_an_empty_queue_changes_nothing(
+        self, repository: QueueRepository, clinic_id: str
+    ) -> None:
+        advance = await repository.advance_clinic_queue(clinic_id)
+
+        assert advance.outcome is AdvanceOutcome.QUEUE_EMPTY
+        assert (advance.now_serving, advance.completed) == (None, None)
+
+    async def test_advancing_an_unknown_clinic_is_reported_as_such(
+        self, repository: QueueRepository
+    ) -> None:
+        with pytest.raises(ClinicNotFoundError):
+            await repository.advance_clinic_queue("no-such-clinic")
+
+    async def test_the_queue_drains_one_patient_at_a_time(
+        self,
+        repository: QueueRepository,
+        session: AsyncSession,
+        clinic_id: str,
+    ) -> None:
+        # The whole point of the feature: before it existed, a queue
+        # could only ever grow.
+        users = []
+        for index in range(4):
+            user = await UserRepository(session).create_user(
+                email=f"drain{index}@example.com",
+                hashed_password="hashed",
+                full_name=f"Drain {index}",
+            )
+            await session.flush()
+            users.append(user.id)
+        for user_id in users:
+            await repository.join_queue(clinic_id=clinic_id, user_id=user_id)
+
+        seen: list[int] = []
+        for _ in range(4):
+            advance = await repository.advance_clinic_queue(clinic_id)
+            assert advance.now_serving is not None
+            seen.append(advance.now_serving.ticket_number)
+
+        # Called strictly in ticket order.
+        assert seen == [1, 2, 3, 4]
+
+        final = await repository.advance_clinic_queue(clinic_id)
+        assert final.outcome is AdvanceOutcome.COMPLETED_LAST
+        assert (await repository.get_clinics_with_queue_status())[0].waiting_count == 0
+
+    async def test_a_cancelled_patient_is_skipped(
+        self,
+        repository: QueueRepository,
+        clinic_id: str,
+        patient_id: str,
+        other_patient_id: str,
+    ) -> None:
+        first = await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        second = await repository.join_queue(
+            clinic_id=clinic_id, user_id=other_patient_id
+        )
+        await repository.cancel_reservation(first.id)
+
+        advance = await repository.advance_clinic_queue(clinic_id)
+
+        assert advance.now_serving is not None
+        assert advance.now_serving.id == second.id
+
+
+class TestTheQueueStatusReflectsConsultations:
+    async def test_the_patient_in_the_room_is_not_counted_as_waiting(
+        self,
+        repository: QueueRepository,
+        clinic_id: str,
+        patient_id: str,
+        other_patient_id: str,
+    ) -> None:
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        await repository.join_queue(clinic_id=clinic_id, user_id=other_patient_id)
+        await repository.advance_clinic_queue(clinic_id)
+
+        queue = (await repository.get_clinics_with_queue_status())[0]
+
+        # Two people present, but only one still to be called.
+        assert queue.waiting_count == 1
+        assert queue.now_serving_ticket == 1
+
+    async def test_an_idle_room_reports_no_ticket(
+        self, repository: QueueRepository, clinic_id: str, patient_id: str
+    ) -> None:
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+
+        queue = (await repository.get_clinics_with_queue_status())[0]
+
+        assert queue.now_serving_ticket is None
+
+    async def test_a_patient_in_the_room_still_counts_as_ahead_of_you(
+        self,
+        repository: QueueRepository,
+        clinic_id: str,
+        patient_id: str,
+        other_patient_id: str,
+    ) -> None:
+        # Excluding them would tell everyone behind that they had moved
+        # up, when nothing had actually finished.
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        mine = await repository.join_queue(
+            clinic_id=clinic_id, user_id=other_patient_id
+        )
+        await repository.advance_clinic_queue(clinic_id)
+
+        refreshed = await repository.get_reservation_by_id(mine.id)
+
+        assert refreshed is not None
+        assert refreshed.people_ahead == 1
+
+    async def test_being_called_in_is_still_an_active_place(
+        self, repository: QueueRepository, clinic_id: str, patient_id: str
+    ) -> None:
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        await repository.advance_clinic_queue(clinic_id)
+
+        mine = await repository.get_active_reservation_for_user(patient_id)
+
+        assert mine is not None
+        assert mine.is_in_consultation
+
+    async def test_a_patient_in_the_room_cannot_take_a_second_ticket(
+        self, repository: QueueRepository, clinic_id: str, patient_id: str
+    ) -> None:
+        await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
+        await repository.advance_clinic_queue(clinic_id)
+
+        with pytest.raises(AlreadyInQueueError):
+            await repository.join_queue(clinic_id=clinic_id, user_id=patient_id)
 
 
 class TestRecordsAreNotOrmObjects:

@@ -21,9 +21,15 @@ from ...layer_4_data_access.repositories.queue_repository import (
     ReservationRecord,
 )
 from ...layer_4_data_access.repositories.user_repository import UserRecord
-from ..auth.deps import get_current_user, get_current_user_or_none
+from ...layer_3_business.authz.roles import Permission
+from ..auth.deps import (
+    get_current_user,
+    get_current_user_or_none,
+    require_permission,
+)
 from ..controllers.queue_controller import QueueController
 from ..schemas.queue_schemas import (
+    AdvanceQueueResponse,
     ClinicQueueResponse,
     ClinicResponse,
     ErrorResponse,
@@ -80,6 +86,7 @@ def _to_queue_response(queue: ClinicQueueRecord) -> ClinicQueueResponse:
         ),
         waiting_count=queue.waiting_count,
         average_service_minutes=queue.service_rate_minutes,
+        now_serving_ticket=queue.now_serving_ticket,
         is_accepting_patients=queue.is_accepting_patients,
         estimated_wait_minutes=queue.waiting_count * queue.service_rate_minutes,
     )
@@ -173,6 +180,60 @@ async def join_queue(
         clinic_id=clinic_id, current_user_id=current_user.id
     )
     return _to_reservation_response(reservation)
+
+
+@router.post(
+    "/{clinic_id}/next",
+    response_model=AdvanceQueueResponse,
+    responses={
+        401: _ERROR_RESPONSES[401],
+        403: {
+            "model": ErrorResponse,
+            "description": "The caller may not advance clinic queues.",
+        },
+        404: _ERROR_RESPONSES[404],
+    },
+    summary="Call the next patient",
+    description=(
+        "Completes the consultation in progress and admits the patient "
+        "holding the lowest outstanding ticket.\n\n"
+        "**Staff only.** Requires the `queue:advance` permission, held "
+        "by the `clinic_staff` and `admin` roles and by no ordinary "
+        "patient — someone standing in the queue who could advance it "
+        "could serve themselves to the front of it.\n\n"
+        "The transition happens under a row lock on the clinic, so two "
+        "receptionists pressing the button at the same moment advance "
+        "the queue by two patients rather than one silently swallowing "
+        "the other.\n\n"
+        "Pressing this on an empty queue is **not** an error: the "
+        "response reports `queue_empty` and nothing changes."
+    ),
+)
+async def advance_queue(
+    clinic_id: str,
+    controller: QueueController = Depends(get_queue_controller),
+    _: UserRecord = Depends(require_permission(Permission.QUEUE_ADVANCE)),
+) -> AdvanceQueueResponse:
+    """Call the next patient in a clinic's queue.
+
+    Requires a valid `Authorization: Bearer <token>` for an account
+    holding `queue:advance`.
+    """
+    advance = await controller.advance_queue(clinic_id=clinic_id)
+    return AdvanceQueueResponse(
+        outcome=advance.outcome.value,
+        now_serving=(
+            _to_reservation_response(advance.now_serving)
+            if advance.now_serving is not None
+            else None
+        ),
+        completed=(
+            _to_reservation_response(advance.completed)
+            if advance.completed is not None
+            else None
+        ),
+        queue=_to_queue_response(advance.queue),
+    )
 
 
 @router.delete(

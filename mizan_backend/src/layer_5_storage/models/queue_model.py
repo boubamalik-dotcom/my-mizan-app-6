@@ -27,10 +27,13 @@ defence is layered:
 from __future__ import annotations
 
 import enum
+from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     Enum as SqlEnum,
     ForeignKey,
     Index,
@@ -67,19 +70,29 @@ class ReservationStatus(str, enum.Enum):
     `tests/test_layer_isolation.py` keeps the two definitions in sync.
     """
 
-    #: Holding a place; counts toward the queue length.
+    #: Holding a place in line, not yet called.
     WAITING = "waiting"
+    #: Called in and currently with the clinician. Still occupies a
+    #: place in the queue — the patient has not left yet, and everyone
+    #: behind them is still behind them.
+    IN_CONSULTATION = "in_consultation"
     #: Seen by the clinic. Terminal.
     SERVED = "served"
     #: Given up, by the patient or the clinic. Terminal.
     CANCELLED = "cancelled"
 
 
-#: The statuses that occupy a place in the queue. A single-item tuple
-#: today, named because "active" is the concept the repository filters
-#: on, and a future 'in_consultation' status would belong here without
-#: every query needing to be found and edited.
-ACTIVE_STATUSES = (ReservationStatus.WAITING,)
+#: The statuses that occupy a place in the queue.
+#:
+#: `IN_CONSULTATION` counts as occupying a place deliberately: a patient
+#: in the room is still ahead of everyone waiting, so excluding them
+#: would move every remaining patient up a place the moment the
+#: clinician called someone in — telling the whole waiting room they had
+#: advanced when nothing had actually finished.
+ACTIVE_STATUSES = (ReservationStatus.WAITING, ReservationStatus.IN_CONSULTATION)
+
+#: The statuses a reservation can never leave.
+TERMINAL_STATUSES = (ReservationStatus.SERVED, ReservationStatus.CANCELLED)
 
 
 class ClinicModel(Base, TimestampMixin):
@@ -197,6 +210,27 @@ class ReservationModel(Base, TimestampMixin):
         ),
         nullable=False,
         default=ReservationStatus.WAITING,
+    )
+
+    #: When the clinic called this patient in — the moment the status
+    #: became `IN_CONSULTATION`. Null while they are still waiting, and
+    #: null forever for anyone who cancelled before being called.
+    called_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    #: When the reservation reached a terminal status, whether that was
+    #: `SERVED` or `CANCELLED`.
+    #:
+    #: Recorded separately from `updated_at`, which any future edit
+    #: would overwrite. These two columns are what make a clinic's day
+    #: measurable after the fact — how long people actually waited
+    #: (`called_at - created_at`) and how long consultations actually
+    #: took (`completed_at - called_at`) — which is the only honest way
+    #: to tune `ClinicModel.service_rate_minutes` away from its
+    #: guessed default.
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper

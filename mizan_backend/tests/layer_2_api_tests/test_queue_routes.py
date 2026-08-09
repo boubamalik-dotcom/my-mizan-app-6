@@ -18,9 +18,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from src.layer_2_api.audit.audit_controller import AuditController
 from src.layer_2_api.auth.auth_controller import AuthController
 from src.layer_2_api.controllers.queue_controller import QueueController
 from src.layer_2_api.main_router import api_router
+from src.layer_3_business.audit.audit_service import AuditService
 from src.layer_3_business.auth.auth_service import AuthService
 from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.base_model import Base
@@ -28,6 +30,9 @@ from src.layer_5_storage.db_config import build_engine, build_session_factory
 
 TEST_SECRET_KEY = "test-secret-key-at-least-32-bytes-long-for-hmac-sha256"
 TEST_PASSWORD = "correct-horse-battery-staple"
+#: Promoted to admin at registration by the auth controller, which is
+#: how a test gets an account able to grant roles.
+BOOTSTRAP_ADMIN = "admin@example.com"
 
 
 @pytest_asyncio.fixture
@@ -56,6 +61,13 @@ async def app(session_factory: async_sessionmaker) -> FastAPI:
     )
     application.state.auth_controller = AuthController(
         auth_service=AuthService(secret_key=TEST_SECRET_KEY),
+        unit_of_work_factory=unit_of_work_factory,
+        bootstrap_admin_emails=[BOOTSTRAP_ADMIN],
+    )
+    # Role administration lives on the audit router, which is how a
+    # test promotes an account to `clinic_staff`.
+    application.state.audit_controller = AuditController(
+        audit_service=AuditService(),
         unit_of_work_factory=unit_of_work_factory,
     )
     return application
@@ -86,6 +98,42 @@ async def _register_and_login(client: AsyncClient, *, email: str) -> Tuple[str, 
 
 def _auth_headers(token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+async def _admin(client: AsyncClient) -> str:
+    """The bootstrap admin's token."""
+    _, token = await _register_and_login(client, email=BOOTSTRAP_ADMIN)
+    return token
+
+
+async def _with_role(client: AsyncClient, *, email: str, role: str) -> str:
+    """Registers a user, has the admin grant them `role`, and returns a
+    token that carries it.
+
+    The token is fetched *after* the promotion because roles are
+    resolved per request from the account, not baked into the token —
+    but logging in again also proves the promotion actually persisted
+    rather than only appearing in the promoting admin's response.
+    """
+    user_id, _ = await _register_and_login(client, email=email)
+    admin_token = await _admin(client)
+
+    promoted = await client.patch(
+        f"/api/v1/audit/users/{user_id}/role",
+        json={"role": role},
+        headers=_auth_headers(admin_token),
+    )
+    assert promoted.status_code == 200, promoted.text
+
+    logged_in = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD}
+    )
+    return logged_in.json()["access_token"]
+
+
+async def _staff(client: AsyncClient, *, email: str = "reception@example.com") -> str:
+    """A `clinic_staff` token — the role that may call patients."""
+    return await _with_role(client, email=email, role="clinic_staff")
 
 
 async def _create_clinic(
@@ -488,6 +536,312 @@ class TestCancelling:
         )
 
         assert response.status_code == 404
+
+
+class TestCallingTheNextPatient:
+    async def test_requires_authentication(
+        self, client: AsyncClient, clinic_id: str
+    ) -> None:
+        response = await client.post(f"/api/v1/queues/{clinic_id}/next")
+        assert response.status_code == 401
+
+    async def test_an_ordinary_patient_may_not_advance_the_queue(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        # The rule the whole permission exists for: someone standing in
+        # the queue who could advance it could serve themselves to the
+        # front of it.
+        _, token = patient
+
+        response = await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(token)
+        )
+
+        assert response.status_code == 403
+
+    async def test_a_refused_call_does_not_move_the_queue(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        # The 403 must be a refusal, not a failed-but-partial advance.
+        _, token = patient
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/reservations", headers=_auth_headers(token)
+        )
+
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(token)
+        )
+
+        queue = (await client.get("/api/v1/queues")).json()["queues"][0]
+        assert queue["waiting_count"] == 1
+        assert queue["now_serving_ticket"] is None
+
+    async def test_an_auditor_may_not_advance_the_queue(
+        self, client: AsyncClient, clinic_id: str
+    ) -> None:
+        # Auditors are read-only by design; calling a patient is a
+        # write, so the read-only guarantee has to hold here too.
+        token = await _with_role(client, email="auditor@example.com", role="auditor")
+
+        response = await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(token)
+        )
+
+        assert response.status_code == 403
+
+    async def test_clinic_staff_may_advance_the_queue(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        _, patient_token = patient
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/reservations",
+            headers=_auth_headers(patient_token),
+        )
+        staff_token = await _staff(client)
+
+        response = await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["outcome"] == "called_next"
+
+    async def test_an_admin_may_advance_the_queue(
+        self, client: AsyncClient, clinic_id: str
+    ) -> None:
+        admin_token = await _admin(client)
+
+        response = await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(admin_token)
+        )
+
+        assert response.status_code == 200, response.text
+
+    async def test_moves_the_patient_from_waiting_to_in_consultation(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        _, patient_token = patient
+        joined = (
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/reservations",
+                headers=_auth_headers(patient_token),
+            )
+        ).json()
+        assert joined["status"] == "waiting"
+        staff_token = await _staff(client)
+
+        body = (
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+            )
+        ).json()
+
+        assert body["now_serving"]["id"] == joined["id"]
+        assert body["now_serving"]["status"] == "in_consultation"
+        assert body["completed"] is None
+
+    async def test_marks_the_previous_patient_as_served(
+        self,
+        client: AsyncClient,
+        clinic_id: str,
+        patient: Tuple[str, str],
+        other_patient: Tuple[str, str],
+    ) -> None:
+        _, first_token = patient
+        _, second_token = other_patient
+        first = (
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/reservations",
+                headers=_auth_headers(first_token),
+            )
+        ).json()
+        second = (
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/reservations",
+                headers=_auth_headers(second_token),
+            )
+        ).json()
+        staff_token = await _staff(client)
+
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+        )
+        body = (
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+            )
+        ).json()
+
+        assert body["completed"]["id"] == first["id"]
+        assert body["completed"]["status"] == "served"
+        assert body["now_serving"]["id"] == second["id"]
+
+    async def test_returns_the_updated_queue_state(
+        self,
+        client: AsyncClient,
+        clinic_id: str,
+        patient: Tuple[str, str],
+        other_patient: Tuple[str, str],
+    ) -> None:
+        for _, token in (patient, other_patient):
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/reservations", headers=_auth_headers(token)
+            )
+        staff_token = await _staff(client)
+
+        body = (
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+            )
+        ).json()
+
+        # One called in, one still to come.
+        assert body["queue"]["waiting_count"] == 1
+        assert body["queue"]["now_serving_ticket"] == 1
+
+    async def test_an_empty_queue_is_reported_not_refused(
+        self, client: AsyncClient, clinic_id: str
+    ) -> None:
+        # Pressing the button on an empty queue is not a mistake, so it
+        # must not answer with an error.
+        staff_token = await _staff(client)
+
+        response = await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["outcome"] == "queue_empty"
+        assert (body["now_serving"], body["completed"]) == (None, None)
+
+    async def test_finishing_the_last_patient_is_distinguishable(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        _, patient_token = patient
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/reservations",
+            headers=_auth_headers(patient_token),
+        )
+        staff_token = await _staff(client)
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+        )
+
+        body = (
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+            )
+        ).json()
+
+        assert body["outcome"] == "completed_last"
+        assert body["completed"] is not None
+        assert body["now_serving"] is None
+
+    async def test_an_unknown_clinic_is_not_found(self, client: AsyncClient) -> None:
+        staff_token = await _staff(client)
+
+        response = await client.post(
+            "/api/v1/queues/no-such-clinic/next", headers=_auth_headers(staff_token)
+        )
+
+        assert response.status_code == 404
+
+    async def test_the_queue_drains_instead_of_growing_forever(
+        self, client: AsyncClient, session_factory: async_sessionmaker, clinic_id: str
+    ) -> None:
+        # The gap this feature closes: before it, a reservation could
+        # only be created or cancelled, so a queue never shrank through
+        # normal use.
+        tokens = [
+            (await _register_and_login(client, email=f"drain{i}@example.com"))[1]
+            for i in range(3)
+        ]
+        for token in tokens:
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/reservations", headers=_auth_headers(token)
+            )
+        assert (await client.get("/api/v1/queues")).json()["queues"][0][
+            "waiting_count"
+        ] == 3
+
+        staff_token = await _staff(client)
+        for _ in range(4):
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+            )
+
+        queue = (await client.get("/api/v1/queues")).json()["queues"][0]
+        assert queue["waiting_count"] == 0
+        assert queue["now_serving_ticket"] is None
+
+
+class TestWhatThePatientSeesWhenCalled:
+    async def test_their_own_place_reports_the_consultation(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        _, patient_token = patient
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/reservations",
+            headers=_auth_headers(patient_token),
+        )
+        staff_token = await _staff(client)
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+        )
+
+        mine = (
+            await client.get("/api/v1/queues", headers=_auth_headers(patient_token))
+        ).json()["reservation"]
+
+        assert mine is not None
+        assert mine["status"] == "in_consultation"
+        assert mine["position"] == 0
+
+    async def test_a_served_patient_no_longer_holds_a_place(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        _, patient_token = patient
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/reservations",
+            headers=_auth_headers(patient_token),
+        )
+        staff_token = await _staff(client)
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+        )
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+        )
+
+        body = (
+            await client.get("/api/v1/queues", headers=_auth_headers(patient_token))
+        ).json()
+
+        assert body["reservation"] is None
+
+    async def test_a_served_patient_may_join_again(
+        self, client: AsyncClient, clinic_id: str, patient: Tuple[str, str]
+    ) -> None:
+        # A follow-up visit later the same day is legitimate.
+        _, patient_token = patient
+        await client.post(
+            f"/api/v1/queues/{clinic_id}/reservations",
+            headers=_auth_headers(patient_token),
+        )
+        staff_token = await _staff(client)
+        for _ in range(2):
+            await client.post(
+                f"/api/v1/queues/{clinic_id}/next", headers=_auth_headers(staff_token)
+            )
+
+        again = await client.post(
+            f"/api/v1/queues/{clinic_id}/reservations",
+            headers=_auth_headers(patient_token),
+        )
+
+        assert again.status_code == 201, again.text
+        assert again.json()["ticket_number"] == 2
 
 
 class TestTheQueueMovesWithoutRewritingTickets:

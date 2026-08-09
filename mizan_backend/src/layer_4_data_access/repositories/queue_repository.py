@@ -16,14 +16,15 @@ updated whose version could go stale. See `join_queue` for the fix.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...layer_3_business.queue.queue_service import QueueService
+from ...layer_3_business.queue.queue_service import AdvanceOutcome, QueueService
+from ...layer_5_storage.base_model import utcnow
 from ...layer_5_storage.models.queue_model import (
     ACTIVE_STATUSES,
     ClinicModel,
@@ -36,6 +37,27 @@ from ...layer_5_storage.models.queue_model import (
 #: `AuthorizationService`. Layer 4 importing Layer 3 is the permitted
 #: direction (`tests/test_layer_isolation.py`); the reverse is not.
 _rules = QueueService()
+
+#: Tickets still to be called. Counts `WAITING` only, so the figure
+#: means "people yet to be seen" rather than lumping in whoever is
+#: already in the room.
+_WAITING_COUNT = func.count(
+    case((ReservationModel.status == ReservationStatus.WAITING, 1))
+).label("waiting_count")
+
+#: The ticket currently with the clinician, or `NULL` when the room is
+#: free. `MAX` over a single-row-or-empty set: `ACTIVE_STATUSES`
+#: contains exactly one in-consultation ticket per clinic, so the
+#: aggregate is just a way to pick it out in the same grouped query as
+#: the count.
+_NOW_SERVING_TICKET = func.max(
+    case(
+        (
+            ReservationModel.status == ReservationStatus.IN_CONSULTATION,
+            ReservationModel.position,
+        )
+    )
+).label("now_serving_ticket")
 
 
 class QueueRepositoryError(Exception):
@@ -94,7 +116,7 @@ class TicketNumberCollisionError(QueueRepositoryError):
 
 @dataclass(frozen=True, slots=True)
 class ClinicQueueRecord:
-    """A clinic together with the current length of its queue —
+    """A clinic together with the current state of its queue —
     everything `GET /queues` needs about one clinic, in one immutable
     snapshot."""
 
@@ -104,9 +126,37 @@ class ClinicQueueRecord:
     district: str
     service_rate_minutes: int
     is_accepting_patients: bool
-    #: Active tickets currently held. The number of people who would be
-    #: ahead of someone joining now.
+
+    #: Tickets in `WAITING` — people in the room are counted by
+    #: `now_serving_ticket` instead, because "3 waiting" should mean
+    #: three people still to be called, not two plus one already being
+    #: seen.
     waiting_count: int
+
+    #: The ticket currently with the clinician, or `None` if the room is
+    #: free. This is the "now serving 42" figure a waiting-room display
+    #: exists to show.
+    now_serving_ticket: Optional[int] = None
+
+
+@dataclass(frozen=True, slots=True)
+class QueueAdvanceRecord:
+    """The result of calling the next patient.
+
+    Carries both sides of the transition, because a clinician needs to
+    see the patient who just finished as well as the one now called —
+    and because a client that only learned about the new arrival could
+    not tell whether the previous consultation ended or was skipped.
+    """
+
+    #: What the advance amounted to, decided by Layer 3.
+    outcome: AdvanceOutcome
+    #: The patient just called in, if any.
+    now_serving: Optional["ReservationRecord"]
+    #: The patient whose consultation was just completed, if any.
+    completed: Optional["ReservationRecord"]
+    #: The clinic's queue as it stands after the advance.
+    queue: ClinicQueueRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +181,15 @@ class ReservationRecord:
     estimated_wait_minutes: int
     status: ReservationStatus
     created_at: datetime
+    #: When the clinic called this patient in; `None` until they are.
+    called_at: Optional[datetime] = None
+    #: When the reservation was served or cancelled; `None` while active.
+    completed_at: Optional[datetime] = None
+
+    @property
+    def is_in_consultation(self) -> bool:
+        """Whether this patient is with the clinician right now."""
+        return self.status is ReservationStatus.IN_CONSULTATION
 
 
 class QueueRepository:
@@ -175,9 +234,8 @@ class QueueRepository:
             list is stable between requests rather than reordering
             itself on every refresh.
         """
-        waiting_count = func.count(ReservationModel.id).label("waiting_count")
         statement = (
-            select(ClinicModel, waiting_count)
+            select(ClinicModel, _WAITING_COUNT, _NOW_SERVING_TICKET)
             .outerjoin(
                 ReservationModel,
                 (ReservationModel.clinic_id == ClinicModel.id)
@@ -189,8 +247,8 @@ class QueueRepository:
 
         result = await self._session.execute(statement)
         return [
-            self._to_clinic_queue_record(clinic, count)
-            for clinic, count in result.all()
+            self._to_clinic_queue_record(clinic, count, now_serving)
+            for clinic, count, now_serving in result.all()
         ]
 
     async def get_active_reservation_for_user(
@@ -341,6 +399,115 @@ class QueueRepository:
 
         return await self._hydrate(reservation, clinic=clinic)
 
+    async def advance_clinic_queue(self, clinic_id: str) -> QueueAdvanceRecord:
+        """Calls the next patient: completes the current consultation
+        and admits whoever is at the front of the line.
+
+        **The concurrency guarantee**, and the reason this is one method
+        rather than three. It opens with the same
+        ``SELECT ... FOR UPDATE`` lock on the clinic row that
+        `join_queue` takes, held until the transaction commits, which
+        buys three separate things:
+
+        1. Two receptionists pressing the button at the same instant are
+           serialised. Without the lock both read the same "next
+           waiting" row and both promote it, so two clicks advance the
+           queue by one patient and the second click silently vanishes —
+           the clinician presses again, nothing happens, and the room
+           waits. (This is not hypothetical: it is exactly how the
+           unlocked implementation on
+           `cursor/mizan-door-backend-setup-1fc8` behaves — three
+           simultaneous clicks there produced a single promotion.)
+        2. It cannot interleave with a `join_queue` for the same clinic,
+           so nobody is admitted between reading the front of the line
+           and promoting it.
+        3. It serialises with itself across *processes*, not just
+           `asyncio` tasks, because the lock lives in the database
+           rather than in this one worker.
+
+        Every patient found in `IN_CONSULTATION` is completed, not just
+        the first. Normally there is exactly one; sweeping them all
+        means that if the invariant were ever broken — by a manual
+        `UPDATE`, say — the queue heals on the next advance instead of
+        wedging forever behind a patient who never leaves.
+
+        Args:
+            clinic_id: The clinic whose queue to advance.
+
+        Returns:
+            A `QueueAdvanceRecord` describing what happened, including
+            the clinic's queue afterwards.
+
+        Raises:
+            ClinicNotFoundError: If `clinic_id` does not exist.
+        """
+        clinic = await self._lock_clinic(clinic_id)
+
+        completing = list(
+            (
+                await self._session.execute(
+                    select(ReservationModel)
+                    .where(
+                        ReservationModel.clinic_id == clinic_id,
+                        ReservationModel.status
+                        == ReservationStatus.IN_CONSULTATION,
+                    )
+                    .order_by(ReservationModel.position.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        next_waiting = (
+            await self._session.execute(
+                select(ReservationModel)
+                .where(
+                    ReservationModel.clinic_id == clinic_id,
+                    ReservationModel.status == ReservationStatus.WAITING,
+                )
+                # Ticket order is the queue's promise to the room: the
+                # lowest outstanding ticket is next, always.
+                .order_by(ReservationModel.position.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        outcome = _rules.classify_advance(
+            had_patient_in_consultation=bool(completing),
+            has_next_waiting=next_waiting is not None,
+        )
+
+        now = utcnow()
+        for reservation in completing:
+            reservation.status = ReservationStatus.SERVED
+            reservation.completed_at = now
+
+        if next_waiting is not None:
+            next_waiting.status = ReservationStatus.IN_CONSULTATION
+            next_waiting.called_at = now
+
+        if _rules.advance_changed_the_queue(outcome):
+            await self._session.flush()
+
+        # Hydrated after the flush so the derived positions and the
+        # queue counts describe the state the caller is being handed,
+        # not the one that existed before the button was pressed.
+        return QueueAdvanceRecord(
+            outcome=outcome,
+            now_serving=(
+                await self._hydrate(next_waiting, clinic=clinic)
+                if next_waiting is not None
+                else None
+            ),
+            completed=(
+                await self._hydrate(completing[0], clinic=clinic)
+                if completing
+                else None
+            ),
+            queue=await self._clinic_queue_snapshot(clinic),
+        )
+
     async def cancel_reservation(self, reservation_id: str) -> ReservationRecord:
         """Gives up a place in a queue, leaving the row in place with a
         terminal status.
@@ -373,6 +540,7 @@ class QueueRepository:
         )
 
         reservation.status = ReservationStatus.CANCELLED
+        reservation.completed_at = utcnow()
         await self._session.flush()
         return await self._hydrate(reservation)
 
@@ -501,14 +669,59 @@ class QueueRepository:
             if is_active
             else 0,
             status=reservation.status,
-            created_at=reservation.created_at,
+            created_at=self._as_utc(reservation.created_at),
+            called_at=self._as_utc(reservation.called_at),
+            completed_at=self._as_utc(reservation.completed_at),
         )
+
+    async def _clinic_queue_snapshot(
+        self, clinic: ClinicModel
+    ) -> ClinicQueueRecord:
+        """The queue figures for one already-loaded clinic.
+
+        The single-clinic counterpart of
+        `get_clinics_with_queue_status`, for callers that have just
+        changed one clinic's queue and need to report its new state
+        without re-reading every other clinic in the country.
+        """
+        row = (
+            await self._session.execute(
+                select(_WAITING_COUNT, _NOW_SERVING_TICKET).where(
+                    ReservationModel.clinic_id == clinic.id,
+                    ReservationModel.status.in_(ACTIVE_STATUSES),
+                )
+            )
+        ).one()
+        return self._to_clinic_queue_record(clinic, row[0], row[1])
+
+    @staticmethod
+    def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+        """Normalises a persisted timestamp to timezone-aware UTC.
+
+        SQLite has no timestamp type that carries an offset, so a value
+        read back from it is naive even though the column is declared
+        ``DateTime(timezone=True)`` — while a value written moments ago
+        and still in the session's identity map is the aware object we
+        set. Handing both out unchanged means
+        ``completed_at - called_at`` raises *"can't compare
+        offset-naive and offset-aware datetimes"* on the development
+        database and works on Postgres, which is the worst of both.
+
+        Since everything this layer writes is UTC (`utcnow`), a naive
+        value can only be UTC, so labelling it as such loses nothing
+        and makes the records comparable everywhere.
+        """
+        if value is None or value.tzinfo is not None:
+            return value
+        return value.replace(tzinfo=timezone.utc)
 
     @staticmethod
     def _to_clinic_queue_record(
-        clinic: ClinicModel, waiting_count: int
+        clinic: ClinicModel,
+        waiting_count: Optional[int],
+        now_serving_ticket: Optional[int] = None,
     ) -> ClinicQueueRecord:
-        """Maps a `ClinicModel` row plus its queue length to the
+        """Maps a `ClinicModel` row plus its queue figures to the
         plain-data `ClinicQueueRecord`."""
         return ClinicQueueRecord(
             id=clinic.id,
@@ -518,6 +731,9 @@ class QueueRepository:
             service_rate_minutes=clinic.service_rate_minutes,
             is_accepting_patients=clinic.is_accepting_patients,
             waiting_count=int(waiting_count or 0),
+            now_serving_ticket=(
+                int(now_serving_ticket) if now_serving_ticket is not None else None
+            ),
         )
 
 
@@ -526,8 +742,10 @@ class QueueRepository:
 #: `wallet_controller.py` imports its error types from the repository
 #: module rather than reaching across to Layer 3 separately.
 __all__: Sequence[str] = (
+    "AdvanceOutcome",
     "ClinicNotFoundError",
     "ClinicQueueRecord",
+    "QueueAdvanceRecord",
     "QueueRepository",
     "QueueRepositoryError",
     "ReservationNotFoundError",

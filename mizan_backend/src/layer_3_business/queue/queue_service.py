@@ -13,11 +13,31 @@ atomically.
 """
 from __future__ import annotations
 
+import enum
+
 from .exceptions import (
     AlreadyInQueueError,
     ClinicNotAcceptingPatientsError,
     ReservationNotActiveError,
 )
+
+
+class AdvanceOutcome(str, enum.Enum):
+    """What happened when a clinic asked for the next patient.
+
+    Three distinct results, because "nothing was called" is ambiguous
+    on its own and the clinician needs to know which of the two it was:
+    the last patient just finished and the room is now free, or there
+    was never anybody there.
+    """
+
+    #: A patient was called in. Any previous consultation was completed.
+    CALLED_NEXT = "called_next"
+    #: The patient in the room was completed, and nobody was waiting to
+    #: replace them. The queue is now empty.
+    COMPLETED_LAST = "completed_last"
+    #: Nobody was in the room and nobody was waiting; nothing changed.
+    QUEUE_EMPTY = "queue_empty"
 
 
 class QueueService:
@@ -81,6 +101,48 @@ class QueueService:
         if people_ahead <= 0 or service_rate_minutes <= 0:
             return 0
         return people_ahead * service_rate_minutes
+
+    # -- Advancing the queue ---------------------------------------------
+
+    def classify_advance(
+        self, *, had_patient_in_consultation: bool, has_next_waiting: bool
+    ) -> AdvanceOutcome:
+        """Decides what "call the next patient" amounts to, given what
+        the queue currently holds.
+
+        Both inputs are facts only Layer 4 can establish; deciding what
+        they *mean* stays here, which is what makes the three outcomes
+        testable without a database.
+
+        Deliberately **not** an error when there is nobody to call. A
+        receptionist tapping the button on an empty queue has not done
+        anything wrong, and answering with a failure would train them to
+        ignore failures. `QUEUE_EMPTY` says plainly that nothing
+        happened.
+
+        Args:
+            had_patient_in_consultation: Whether someone was with the
+                clinician when the button was pressed.
+            has_next_waiting: Whether anyone was waiting to be called.
+
+        Returns:
+            The outcome the caller should report.
+        """
+        if has_next_waiting:
+            return AdvanceOutcome.CALLED_NEXT
+        if had_patient_in_consultation:
+            return AdvanceOutcome.COMPLETED_LAST
+        return AdvanceOutcome.QUEUE_EMPTY
+
+    def advance_changed_the_queue(self, outcome: AdvanceOutcome) -> bool:
+        """Whether `outcome` means anything was actually written.
+
+        Used to decide whether the transaction has changes worth
+        committing and whether anyone needs to be told the queue moved —
+        a no-op advance should not look, to a client, like the queue
+        changed.
+        """
+        return outcome is not AdvanceOutcome.QUEUE_EMPTY
 
     # -- Policy ----------------------------------------------------------
 

@@ -29,6 +29,18 @@ class Role(str, enum.Enum):
     #: own data.
     USER = "user"
 
+    #: Clinic reception. Holds exactly one capability beyond an ordinary
+    #: user's — calling the next patient — so a receptionist can run a
+    #: waiting room without being handed platform administration.
+    #:
+    #: **Not yet scoped to a particular clinic.** Nothing in the data
+    #: model ties an account to a clinic, so this role can advance *any*
+    #: clinic's queue. Narrowing it needs a `users.clinic_id` column and
+    #: an ownership check alongside the permission check; until then,
+    #: grant it only to staff trusted across every clinic on the
+    #: deployment.
+    CLINIC_STAFF = "clinic_staff"
+
     #: Read-only oversight. May inspect *any* wallet's ledger for
     #: regulatory review, but may never move money or change anything —
     #: the separation that makes the audit trail trustworthy.
@@ -76,6 +88,12 @@ class Permission(str, enum.Enum):
     #: Grant or revoke another user's role.
     MANAGE_USER_ROLES = "users:manage_roles"
 
+    #: Call the next patient in a clinic's queue — the operation that
+    #: moves the queue forward. Held by clinic staff, never by the
+    #: patients standing in it: a patient who could advance the queue
+    #: could serve themselves to the front of it.
+    QUEUE_ADVANCE = "queue:advance"
+
 
 #: The complete access-control policy: which permissions each role
 #: holds. Every grant in the system is visible here, in one place.
@@ -89,6 +107,7 @@ class Permission(str, enum.Enum):
 #: one's own data.
 ROLE_PERMISSIONS: Mapping[Role, FrozenSet[Permission]] = {
     Role.USER: frozenset(),
+    Role.CLINIC_STAFF: frozenset({Permission.QUEUE_ADVANCE}),
     Role.AUDITOR: frozenset(
         {
             Permission.AUDIT_READ_LEDGER,
