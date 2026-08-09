@@ -97,7 +97,14 @@ class SqlAlchemyChatRepository(ChatRepository):
             before_created_at = None
             if before_id is not None:
                 anchor = await session.get(ChatMessageModel, before_id)
-                if anchor is not None:
+                # Only honour an anchor from the room being read. The
+                # message list is already filtered by `room_id`, so a
+                # foreign anchor could not leak content — but accepting
+                # one would let a caller learn *when* a message in
+                # someone else's room was written by observing which
+                # cursor shifted the page, and a cursor is not a reason
+                # to hand out that.
+                if anchor is not None and anchor.thread_id == room_id:
                     before_created_at = anchor.created_at
 
             rows = await message_crud.get_history(

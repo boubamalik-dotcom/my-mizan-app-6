@@ -182,6 +182,35 @@ class AuthController:
 
         return user
 
+    async def resolve_user_or_none(self, token: str) -> Optional[UserRecord]:
+        """Resolves a bearer token to its user, or `None` if it does not
+        resolve to an active account.
+
+        The non-raising twin of [get_current_user], for callers that
+        cannot use an `HTTPException`. The WebSocket handshake is the
+        case: a connection that was never accepted has no HTTP response
+        to carry a status code, so it must be closed with a WebSocket
+        close code instead.
+
+        Also closes a hole in the socket handshake: it previously
+        validated only the token's signature and expiry, never loading
+        the account, so an unexpired token belonging to a **deleted or
+        deactivated** user still opened a connection. Going through the
+        same lookup as the REST path means deactivation takes effect on
+        the next connection attempt.
+        """
+        try:
+            payload = self._auth_service.decode_access_token(token)
+        except InvalidTokenError:
+            return None
+
+        async with self._unit_of_work_factory() as uow:
+            user = await uow.users.get_user_by_email(payload.subject)
+
+        if user is None or not user.is_active:
+            return None
+        return user
+
     # -- Internal helpers -------------------------------------------------
 
     @staticmethod

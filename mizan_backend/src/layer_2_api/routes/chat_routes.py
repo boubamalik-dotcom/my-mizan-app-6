@@ -29,10 +29,13 @@ from fastapi import (
 )
 from pydantic import ValidationError
 
-from ...layer_3_business.auth.auth_exceptions import InvalidTokenError
-from ...layer_3_business.auth.auth_service import AuthService
-from ...layer_3_business.chat.exceptions import ChatDomainError
+from ...layer_3_business.chat.exceptions import (
+    ChatDomainError,
+    RoomAccessDeniedError,
+)
+from ...layer_3_business.chat.room_access import assert_room_access
 from ...layer_4_data_access.repositories.user_repository import UserRecord
+from ..auth.auth_controller import AuthController
 from ..auth.deps import get_current_user
 from ..controllers.chat_controller import ChatController
 from ..schemas.chat_schemas import ChatHistoryResponse, ErrorResponse, WebSocketIncomingMessage
@@ -56,14 +59,17 @@ def get_chat_controller_ws(websocket: WebSocket) -> ChatController:
     return websocket.app.state.chat_controller
 
 
-def get_auth_service_ws(websocket: WebSocket) -> AuthService:
-    """Resolves the app-wide `AuthService` singleton for WebSocket
-    routes that need to validate a bearer token passed as a query
-    parameter. Uses the Layer 3 service directly (rather than going
-    through `AuthController`/`get_current_user`, which are built
-    around raising `HTTPException` — meaningless for a connection that
-    was never accepted in the first place)."""
-    return websocket.app.state.auth_service
+def get_auth_controller_ws(websocket: WebSocket) -> AuthController:
+    """Resolves the app-wide `AuthController` for WebSocket routes.
+
+    The socket handshake needs the caller's account, not just a valid
+    signature: the room rule is defined in terms of the user's database
+    id, and loading the account is also what makes deactivation take
+    effect. `AuthController.resolve_user_or_none` exists for exactly
+    this caller — it returns `None` instead of raising an
+    `HTTPException`, which would be meaningless for a connection that
+    was never accepted."""
+    return websocket.app.state.auth_controller
 
 
 @router.get(
@@ -93,22 +99,37 @@ async def get_chat_history(
     """Returns up to `limit` most recent messages for `room_id`,
     oldest first, plus whether older messages exist beyond this page.
 
-    Mirrors the WebSocket endpoint's identity check: `client_id` (the
-    path segment) must match the authenticated caller's own identity
-    (their account email, the same value used as the JWT subject and
-    as the chat participant id), or the request is rejected —
-    `HTTPException(403)` — before any history is fetched. This keeps
-    "who may read a room's history over REST" consistent with "who may
-    join that room over the WebSocket", even though the underlying
-    history itself is stored per-room rather than per-client.
+    Two independent checks, both before any history is read:
 
-    Raises `HTTPException(400)` if the room/business rules reject the
-    request (translated from a Layer 3 `ChatDomainError`).
+    1. `client_id` must be the caller's own identity (their account
+       email, the JWT's subject), so a caller cannot pose as another
+       client.
+    2. **`room_id` must be the caller's own room** —
+       `private_{current_user.id}`, enforced by Layer 3's
+       `assert_room_access`.
+
+    The second check is the fix for a real vulnerability: this endpoint
+    used to validate only the first. Since every client also happened to
+    use one shared room, a caller asking for *their own* `client_id`
+    passed the check and was handed every other user's messages. An
+    identity check alone authorizes *who is asking*, never *what they
+    asked for*.
+
+    Both failures answer a bare `403 Forbidden` with no detail about
+    whether the room exists, so the endpoint cannot be used to
+    enumerate other users' rooms.
     """
     if current_user.email != client_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
         )
+
+    try:
+        assert_room_access(room_id=room_id, user_id=current_user.id)
+    except RoomAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
+        ) from exc
 
     try:
         return await controller.get_history(room_id=room_id, limit=limit)
@@ -132,7 +153,7 @@ async def chat_websocket(
         ),
     ),
     controller: ChatController = Depends(get_chat_controller_ws),
-    auth_service: AuthService = Depends(get_auth_service_ws),
+    auth_controller: AuthController = Depends(get_auth_controller_ws),
 ) -> None:
     """Real-time chat connection.
 
@@ -144,12 +165,23 @@ async def chat_websocket(
       `{"type": "system", "data": {...}}`, `{"type": "pong"}`, or
       `{"type": "error", "detail": "..."}`
 
-    The connection is authenticated *before* it is accepted: `token`
-    must be a valid, unexpired access token whose subject (email)
-    matches `client_id`, or the connection is closed with
-    `status.WS_1008_POLICY_VIOLATION` and no ASGI "accept" message is
-    ever sent — indistinguishable, from the client's perspective, from
-    a server that never saw the request at all.
+    Everything is checked *before* the connection is accepted, so a
+    rejected client never receives an ASGI "accept" and cannot tell our
+    refusal apart from a server that never saw the request:
+
+    1. `token` must be a valid, unexpired access token belonging to an
+       account that still exists and is still active.
+    2. Its subject (email) must match `client_id`.
+    3. **`room_id` must be the caller's own room** —
+       `private_{user.id}`, enforced by Layer 3's `assert_room_access`.
+
+    The third check mirrors the REST history endpoint. Without it, a
+    client could join any room by name and receive every message
+    broadcast into it — which is what made a single shared `general`
+    room a data leak rather than merely a design shortcut.
+
+    Every rejection closes with `WS_1008_POLICY_VIOLATION` and a reason
+    that never reveals whether the requested room exists.
     """
     if not token:
         await websocket.close(
@@ -157,19 +189,31 @@ async def chat_websocket(
         )
         return
 
-    try:
-        token_payload = auth_service.decode_access_token(token)
-    except InvalidTokenError:
+    # Resolves the account rather than just decoding the token: the room
+    # rule needs the user's database id, and going through the same
+    # lookup as the REST path means a deactivated account's unexpired
+    # token no longer opens a socket.
+    user = await auth_controller.resolve_user_or_none(token)
+    if user is None:
         await websocket.close(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Invalid or expired access token.",
         )
         return
 
-    if token_payload.subject != client_id:
+    if user.email != client_id:
         await websocket.close(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Access token does not authorize this client id.",
+        )
+        return
+
+    try:
+        assert_room_access(room_id=room_id, user_id=user.id)
+    except RoomAccessDeniedError:
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Not authorized for this room.",
         )
         return
 

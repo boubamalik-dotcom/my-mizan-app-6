@@ -42,6 +42,29 @@ class NotAParticipantError(ChatDomainError):
         )
 
 
+class RoomAccessDeniedError(ChatDomainError):
+    """Raised when a user attempts to read or join a room that is not
+    theirs.
+
+    Distinct from `NotAParticipantError`, which is about *joining
+    state* — whether a user has entered a room they are entitled to.
+    This one is about *entitlement itself*: the room does not belong to
+    them and no amount of joining would change that.
+
+    Layer 2 maps it to **403 Forbidden** over REST and to a
+    policy-violation close over WebSocket. Deliberately carries no hint
+    about whether the requested room exists, so it cannot be used to
+    enumerate other users' rooms.
+    """
+
+    def __init__(self, room_id: str, user_id: str) -> None:
+        self.room_id = room_id
+        self.user_id = user_id
+        super().__init__(
+            f'User "{user_id}" may not access chat room "{room_id}".'
+        )
+
+
 class AlreadyJoinedError(ChatDomainError):
     """Raised when a user attempts to join a room they are already a
     participant of."""

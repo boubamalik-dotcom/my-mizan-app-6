@@ -30,6 +30,7 @@ from src.layer_2_api.main_router import api_router
 from src.layer_2_api.controllers.chat_controller import ChatController
 from src.layer_3_business.auth.auth_service import AuthService
 from src.layer_3_business.chat.chat_service import ChatService, MessageRateLimiter
+from src.layer_3_business.chat.room_access import private_room_id_for
 from src.layer_4_data_access.events.message_broker import RedisMessageBroker
 from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.base_model import Base
@@ -121,9 +122,13 @@ def client(app: FastAPI) -> TestClient:
 
 
 def _token_for(client_id: str) -> str:
-    """Issues a real, validly-signed access token whose subject is
-    `client_id` — the WebSocket route requires the token's subject to
-    match the `{client_id}` path segment being connected as."""
+    """Issues a validly-signed token for `client_id` with **no backing
+    account**.
+
+    Only useful for asserting rejection now: the WebSocket route
+    resolves the token to a real, active user, so a well-formed token
+    for a subject that was never registered no longer connects.
+    """
     return AuthService(secret_key=TEST_SECRET_KEY).create_access_token(subject=client_id)
 
 
@@ -134,16 +139,15 @@ def _ws_url(client_id: str, *, room_id: str, token: str | None) -> str:
     return url
 
 
-def _register_and_login(client: TestClient, *, email: str) -> str:
-    """Registers a real account (unlike `_token_for`, which mints a
-    token for an arbitrary subject with no backing account) and logs
-    in, returning its access token.
+def _register_and_login(client: TestClient, *, email: str) -> tuple[str, str]:
+    """Registers a real account and logs in, returning
+    `(user_id, access_token)`.
 
-    `GET /chat/history/{client_id}` depends on `get_current_user`,
-    which resolves the token's subject to a real, persisted user —
-    so, unlike the WebSocket route (which only decodes the token),
-    exercising it requires an account created through the real
-    `/auth/register` + `/auth/login` flow.
+    Both routes now need a real, persisted, active account: the history
+    endpoint always did (via `get_current_user`), and the WebSocket
+    endpoint does too since it resolves the caller to derive their
+    private room id. The user id is returned because every room name is
+    built from it.
     """
     register_response = client.post(
         "/api/v1/auth/register",
@@ -155,7 +159,12 @@ def _register_and_login(client: TestClient, *, email: str) -> str:
         "/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD}
     )
     assert login_response.status_code == 200, login_response.text
-    return login_response.json()["access_token"]
+    return register_response.json()["id"], login_response.json()["access_token"]
+
+
+def _private_room(user_id: str) -> str:
+    """The only room a user is permitted to touch."""
+    return private_room_id_for(user_id)
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -170,25 +179,29 @@ def _history_url(client_id: str, *, room_id: str, limit: int | None = None) -> s
 
 
 def test_get_history_for_new_room_is_empty(client: TestClient) -> None:
-    token = _register_and_login(client, email="history-reader@example.com")
+    email = "history-reader@example.com"
+    user_id, token = _register_and_login(client, email=email)
+    room = _private_room(user_id)
+
     response = client.get(
-        _history_url("history-reader@example.com", room_id="room-empty"),
-        headers=_auth_headers(token),
+        _history_url(email, room_id=room), headers=_auth_headers(token)
     )
 
     assert response.status_code == 200
-    body = response.json()
-    assert body == {"room_id": "room-empty", "messages": [], "has_more": False}
+    assert response.json() == {"room_id": room, "messages": [], "has_more": False}
 
 
 def test_websocket_connect_receives_join_announcement(client: TestClient) -> None:
+    email = "alice-join@example.com"
+    user_id, token = _register_and_login(client, email=email)
+
     with client.websocket_connect(
-        _ws_url("alice", room_id="room-1", token=_token_for("alice"))
+        _ws_url(email, room_id=_private_room(user_id), token=token)
     ) as websocket:
         event = websocket.receive_json()
 
         assert event["type"] == "system"
-        assert "alice" in event["data"]["content"]
+        assert email in event["data"]["content"]
         assert event["data"]["type"] == "join"
 
 
@@ -196,10 +209,11 @@ def test_websocket_send_message_is_echoed_back_and_persisted(
     client: TestClient,
 ) -> None:
     client_id = "alice-history@example.com"
-    token = _register_and_login(client, email=client_id)
+    user_id, token = _register_and_login(client, email=client_id)
+    room = _private_room(user_id)
 
     with client.websocket_connect(
-        _ws_url(client_id, room_id="room-2", token=token)
+        _ws_url(client_id, room_id=room, token=token)
     ) as websocket:
         websocket.receive_json()  # join announcement
 
@@ -211,7 +225,7 @@ def test_websocket_send_message_is_echoed_back_and_persisted(
         assert event["data"]["sender_id"] == client_id
 
     history_response = client.get(
-        _history_url(client_id, room_id="room-2"), headers=_auth_headers(token)
+        _history_url(client_id, room_id=room), headers=_auth_headers(token)
     )
     messages = history_response.json()["messages"]
     text_messages = [m for m in messages if m["type"] == "text"]
@@ -232,11 +246,11 @@ def test_client_can_reconnect_after_disconnecting(client: TestClient) -> None:
     every later connection was accepted and then immediately killed.
     """
     client_id = "reconnector@example.com"
-    token = _register_and_login(client, email=client_id)
+    user_id, token = _register_and_login(client, email=client_id)
 
     for attempt in range(3):
         with client.websocket_connect(
-            _ws_url(client_id, room_id="room-reconnect", token=token)
+            _ws_url(client_id, room_id=_private_room(user_id), token=token)
         ) as websocket:
             # Reaching a usable connection is the assertion: a failed
             # rejoin closes the socket instead of answering.
@@ -251,8 +265,11 @@ def test_client_can_reconnect_after_disconnecting(client: TestClient) -> None:
 
 
 def test_websocket_ping_receives_pong(client: TestClient) -> None:
+    email = "pinger@example.com"
+    user_id, token = _register_and_login(client, email=email)
+
     with client.websocket_connect(
-        _ws_url("alice", room_id="room-3", token=_token_for("alice"))
+        _ws_url(email, room_id=_private_room(user_id), token=token)
     ) as websocket:
         websocket.receive_json()  # join announcement
 
@@ -265,8 +282,11 @@ def test_websocket_ping_receives_pong(client: TestClient) -> None:
 def test_websocket_rejects_malformed_frame_without_disconnecting(
     client: TestClient,
 ) -> None:
+    email = "malformed@example.com"
+    user_id, token = _register_and_login(client, email=email)
+
     with client.websocket_connect(
-        _ws_url("alice", room_id="room-4", token=_token_for("alice"))
+        _ws_url(email, room_id=_private_room(user_id), token=token)
     ) as websocket:
         websocket.receive_json()  # join announcement
 
@@ -279,35 +299,78 @@ def test_websocket_rejects_malformed_frame_without_disconnecting(
         assert websocket.receive_json() == {"type": "pong"}
 
 
-def test_two_clients_in_same_room_receive_each_others_messages(
+def test_a_second_user_cannot_join_another_user_s_room(
     client: TestClient,
 ) -> None:
+    """The inverse of the test this replaces.
+
+    That test asserted two clients could share a room and see each
+    other's messages — which is exactly the behaviour that made the
+    shared `general` room a data leak. Under the private-room rule a
+    room belongs to one user, so nobody else may enter it, and this
+    asserts the refusal.
+
+    The trade-off is deliberate and worth stating plainly: it closes the
+    leak and, for now, means two users cannot converse. Real
+    conversations need rooms with more than one legitimate member, which
+    is a membership check rather than a name check — see
+    `layer_3_business/chat/room_access.py`.
+    """
+    alice_id, alice_token = _register_and_login(client, email="alice-room@example.com")
+    _bob_id, bob_token = _register_and_login(client, email="bob-room@example.com")
+
     with client.websocket_connect(
-        _ws_url("alice", room_id="room-5", token=_token_for("alice"))
+        _ws_url("alice-room@example.com", room_id=_private_room(alice_id), token=alice_token)
     ) as ws_alice:
         ws_alice.receive_json()  # alice's own join announcement
 
+        # Bob presents a perfectly valid token for his own client id and
+        # asks for Alice's room. Only the room check stops him.
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                _ws_url(
+                    "bob-room@example.com",
+                    room_id=_private_room(alice_id),
+                    token=bob_token,
+                )
+            ) as ws_bob:
+                ws_bob.receive_json()
+
+        assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
+
+
+def test_a_user_cannot_join_the_old_shared_room(client: TestClient) -> None:
+    # `general` is what every client used to connect to. It is nobody's
+    # private room, so it is now unreachable.
+    email = "general-seeker@example.com"
+    _user_id, token = _register_and_login(client, email=email)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info:
         with client.websocket_connect(
-            _ws_url("bob", room_id="room-5", token=_token_for("bob"))
-        ) as ws_bob:
-            # Both clients observe bob joining.
-            assert "bob" in ws_alice.receive_json()["data"]["content"]
-            assert "bob" in ws_bob.receive_json()["data"]["content"]
+            _ws_url(email, room_id="general", token=token)
+        ) as websocket:
+            websocket.receive_json()
 
-            ws_alice.send_json({"type": "message", "content": "hi bob"})
+    assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
 
-            # Delivered to the sender too (single source of truth via
-            # the broker relay) and to the other participant.
-            message_for_alice = ws_alice.receive_json()
-            message_for_bob = ws_bob.receive_json()
 
-            assert message_for_alice["data"]["content"] == "hi bob"
-            assert message_for_bob["data"]["content"] == "hi bob"
-            assert message_for_alice["data"]["sender_id"] == "alice"
+def test_a_token_for_an_account_that_does_not_exist_is_refused(
+    client: TestClient,
+) -> None:
+    # The socket handshake used to only verify the signature, so a
+    # well-formed token for a subject that was never registered opened a
+    # connection. It now resolves the account.
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect(
+            _ws_url("ghost@example.com", room_id="private_ghost", token=_token_for("ghost@example.com"))
+        ) as websocket:
+            websocket.receive_json()
+
+    assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
 
 
 def test_get_history_rejects_invalid_limit(client: TestClient) -> None:
-    token = _register_and_login(client, email="limit-tester@example.com")
+    _user_id, token = _register_and_login(client, email="limit-tester@example.com")
     response = client.get(
         _history_url("limit-tester@example.com", room_id="room-1", limit=0),
         headers=_auth_headers(token),
@@ -331,7 +394,7 @@ class TestWebSocketAuthentication:
     ) -> None:
         with pytest.raises(WebSocketDisconnect) as exc_info:
             with client.websocket_connect(
-                _ws_url("alice", room_id="room-auth-1", token=None)
+                _ws_url("alice", room_id="private_whoever", token=None)
             ) as websocket:
                 websocket.receive_json()
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
@@ -341,7 +404,7 @@ class TestWebSocketAuthentication:
     ) -> None:
         with pytest.raises(WebSocketDisconnect) as exc_info:
             with client.websocket_connect(
-                _ws_url("alice", room_id="room-auth-2", token="not-a-real-jwt")
+                _ws_url("alice", room_id="private_whoever", token="not-a-real-jwt")
             ) as websocket:
                 websocket.receive_json()
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
@@ -355,7 +418,7 @@ class TestWebSocketAuthentication:
 
         with pytest.raises(WebSocketDisconnect) as exc_info:
             with client.websocket_connect(
-                _ws_url("alice", room_id="room-auth-3", token=forged_token)
+                _ws_url("alice", room_id="private_whoever", token=forged_token)
             ) as websocket:
                 websocket.receive_json()
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
@@ -373,7 +436,7 @@ class TestWebSocketAuthentication:
 
         with pytest.raises(WebSocketDisconnect) as exc_info:
             with client.websocket_connect(
-                _ws_url("alice", room_id="room-auth-4", token=expired_token)
+                _ws_url("alice", room_id="private_whoever", token=expired_token)
             ) as websocket:
                 websocket.receive_json()
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
@@ -388,19 +451,21 @@ class TestWebSocketAuthentication:
 
         with pytest.raises(WebSocketDisconnect) as exc_info:
             with client.websocket_connect(
-                _ws_url("alice", room_id="room-auth-5", token=bobs_token)
+                _ws_url("alice", room_id="private_whoever", token=bobs_token)
             ) as websocket:
                 websocket.receive_json()
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
 
-    def test_connection_succeeds_with_a_valid_matching_token(
+    def test_connection_succeeds_for_a_real_account_in_its_own_room(
         self, client: TestClient
     ) -> None:
-        """Sanity check that the authentication gate itself isn't
-        over-broad: a valid token whose subject matches `client_id`
-        must still be able to connect normally."""
+        """Sanity check that the gates are not over-broad: a real,
+        active account connecting to its own room must still work."""
+        email = "valid-connector@example.com"
+        user_id, token = _register_and_login(client, email=email)
+
         with client.websocket_connect(
-            _ws_url("alice", room_id="room-auth-6", token=_token_for("alice"))
+            _ws_url(email, room_id=_private_room(user_id), token=token)
         ) as websocket:
             event = websocket.receive_json()
             assert event["type"] == "system"
@@ -421,11 +486,13 @@ class TestChatHistoryAuthorization:
         never grant her access to a history request naming Bob's
         identity as `client_id`, even though the room itself is the
         same underlying resource either way."""
-        alice_token = _register_and_login(client, email="alice-cross@example.com")
-        _register_and_login(client, email="bob-cross@example.com")
+        _alice_id, alice_token = _register_and_login(
+            client, email="alice-cross@example.com"
+        )
+        bob_id, _bob_token = _register_and_login(client, email="bob-cross@example.com")
 
         response = client.get(
-            _history_url("bob-cross@example.com", room_id="room-shared"),
+            _history_url("bob-cross@example.com", room_id=_private_room(bob_id)),
             headers=_auth_headers(alice_token),
         )
         assert response.status_code == 403
@@ -433,13 +500,13 @@ class TestChatHistoryAuthorization:
 
     def test_returns_401_without_a_token(self, client: TestClient) -> None:
         response = client.get(
-            _history_url("no-token@example.com", room_id="room-shared")
+            _history_url("no-token@example.com", room_id="private_whoever")
         )
         assert response.status_code in (401, 403)
 
     def test_returns_401_with_a_malformed_token(self, client: TestClient) -> None:
         response = client.get(
-            _history_url("someone@example.com", room_id="room-shared"),
+            _history_url("someone@example.com", room_id="private_whoever"),
             headers=_auth_headers("not-a-real-jwt"),
         )
         assert response.status_code == 401
@@ -447,17 +514,103 @@ class TestChatHistoryAuthorization:
     def test_succeeds_when_client_id_matches_authenticated_user(
         self, client: TestClient
     ) -> None:
-        """Sanity check that the ownership gate isn't over-broad: a
-        caller requesting history *as themselves* must still succeed."""
-        token = _register_and_login(client, email="carol-cross@example.com")
+        """Sanity check that the gates are not over-broad: a caller
+        requesting their own history for their own room must still
+        succeed."""
+        user_id, token = _register_and_login(client, email="carol-cross@example.com")
+        room = _private_room(user_id)
 
         response = client.get(
-            _history_url("carol-cross@example.com", room_id="room-own"),
+            _history_url("carol-cross@example.com", room_id=room),
             headers=_auth_headers(token),
         )
         assert response.status_code == 200
         assert response.json() == {
-            "room_id": "room-own",
+            "room_id": room,
             "messages": [],
             "has_more": False,
         }
+
+    def test_returns_403_for_another_user_s_private_room(
+        self, client: TestClient
+    ) -> None:
+        """The exact request the security audit found.
+
+        Alice asks for **her own** `client_id` — so the identity check
+        that used to be the only gate passes — but names Bob's room.
+        Before the room check existed this returned 200 and Bob's
+        messages.
+        """
+        alice_email = "alice-room-probe@example.com"
+        _alice_id, alice_token = _register_and_login(client, email=alice_email)
+        bob_id, _bob_token = _register_and_login(client, email="bob-room-probe@example.com")
+
+        response = client.get(
+            _history_url(alice_email, room_id=_private_room(bob_id)),
+            headers=_auth_headers(alice_token),
+        )
+
+        assert response.status_code == 403
+        # A bare "Forbidden" with no hint about whether the room exists,
+        # so this cannot be used to enumerate other users' rooms.
+        assert response.json()["detail"] == "Forbidden"
+
+    def test_returns_403_for_the_old_shared_room(self, client: TestClient) -> None:
+        email = "general-reader@example.com"
+        _user_id, token = _register_and_login(client, email=email)
+
+        response = client.get(
+            _history_url(email, room_id="general"), headers=_auth_headers(token)
+        )
+
+        assert response.status_code == 403
+
+    def test_the_reported_leak_is_closed_end_to_end(
+        self, client: TestClient
+    ) -> None:
+        """Reproduces the audit's proof-of-concept and asserts it now
+        fails.
+
+        Alice writes a message; Mallory then makes the request that
+        previously returned it — her own `client_id`, and a room she is
+        not entitled to. Every route she could take is refused, and the
+        one room she *may* read contains nothing of Alice's.
+        """
+        alice_email = "leak-alice@example.com"
+        alice_id, alice_token = _register_and_login(client, email=alice_email)
+        mallory_email = "leak-mallory@example.com"
+        mallory_id, mallory_token = _register_and_login(client, email=mallory_email)
+
+        with client.websocket_connect(
+            _ws_url(alice_email, room_id=_private_room(alice_id), token=alice_token)
+        ) as ws_alice:
+            ws_alice.receive_json()  # join announcement
+            ws_alice.send_json({"type": "message", "content": "SECRET-FROM-ALICE"})
+            ws_alice.receive_json()  # the echo, confirming it persisted
+
+        # Attempt 1: name Alice's room directly.
+        assert (
+            client.get(
+                _history_url(mallory_email, room_id=_private_room(alice_id)),
+                headers=_auth_headers(mallory_token),
+            ).status_code
+            == 403
+        )
+
+        # Attempt 2: the old shared room.
+        assert (
+            client.get(
+                _history_url(mallory_email, room_id="general"),
+                headers=_auth_headers(mallory_token),
+            ).status_code
+            == 403
+        )
+
+        # Attempt 3: her own room, which is all she is entitled to.
+        own = client.get(
+            _history_url(mallory_email, room_id=_private_room(mallory_id)),
+            headers=_auth_headers(mallory_token),
+        )
+        assert own.status_code == 200
+        contents = [m["content"] for m in own.json()["messages"]]
+        assert not any("SECRET-FROM-ALICE" in c for c in contents)
