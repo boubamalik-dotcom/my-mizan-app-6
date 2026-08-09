@@ -1,5 +1,5 @@
-"""Development seed: registers a handful of clinics so Mizan Door has
-something to show.
+"""Development seed: registers a handful of clinics and property
+listings so Mizan Door and Oran Real Estate have something to show.
 
 Run from the backend root, against whatever `DATABASE_URL` points at::
 
@@ -22,6 +22,11 @@ The four clinics deliberately cover every state the queue screen can
 render: a short queue, a long one, an empty one, and a clinic that has
 stopped admitting patients. Without that spread, most of the UI is
 unreachable in a demo, and unreachable UI is unreviewed UI.
+
+The property listings follow the same principle for the amenity filter
+bar: between them they cover every one of the four premium amenities,
+and no single listing has all four, so selecting two chips genuinely
+narrows the results instead of either matching everything or nothing.
 """
 from __future__ import annotations
 
@@ -30,7 +35,10 @@ import logging
 
 from sqlalchemy import select
 
+from decimal import Decimal
+
 from ..db_config import async_session_factory
+from ..models.property_model import PropertyModel
 from ..models.queue_model import ClinicModel
 
 logging.basicConfig(level=logging.INFO)
@@ -78,6 +86,74 @@ async def seed_clinics() -> int:
     return created
 
 
+#: `(title, district, price, bedrooms, bathrooms, area_sqm, featured,
+#: pool, high_floor, king_bed, non_smoking)`.
+SEED_PROPERTIES: tuple[
+    tuple[str, str, str, int, int, int, bool, bool, bool, bool, bool], ...
+] = (
+    ("شقة فاخرة بإطلالة على البحر", "الصديقية، وهران", "42000000",
+     4, 3, 210, True, True, True, True, False),
+    ("بنتهاوس بانورامي في قلب المدينة", "وسط المدينة، وهران", "58500000",
+     5, 4, 280, True, False, True, True, True),
+    ("فيلا عصرية بمسبح خاص", "عين الترك، وهران", "76000000",
+     6, 5, 420, False, True, False, False, True),
+    ("شقة راقية قرب الواجهة البحرية", "المرسى الكبير، وهران", "31500000",
+     3, 2, 155, False, False, False, True, True),
+    ("دوبلكس واسع بحديقة خاصة", "بئر الجير، وهران", "49000000",
+     5, 3, 260, False, False, False, True, False),
+    ("استوديو حديث للمستثمرين", "حي الصباح، وهران", "12800000",
+     1, 1, 62, False, False, True, False, True),
+)
+
+
+async def seed_properties() -> int:
+    """Registers any seed listing not already present, matched by title.
+
+    Returns:
+        How many listings were created by this run.
+    """
+    async with async_session_factory() as session:
+        existing = set(
+            (await session.execute(select(PropertyModel.title))).scalars().all()
+        )
+
+        created = 0
+        for (
+            title, district, price, bedrooms, bathrooms, area,
+            featured, pool, high_floor, king_bed, non_smoking,
+        ) in SEED_PROPERTIES:
+            if title in existing:
+                logger.info("Listing already registered, skipping: %s", title)
+                continue
+            session.add(
+                PropertyModel(
+                    title=title,
+                    description=f"{title} — {district}.",
+                    price=Decimal(price),
+                    district=district,
+                    bedrooms=bedrooms,
+                    bathrooms=bathrooms,
+                    area_sqm=area,
+                    is_featured=featured,
+                    has_private_pool=pool,
+                    is_high_floor=high_floor,
+                    has_king_bed=king_bed,
+                    is_non_smoking=non_smoking,
+                )
+            )
+            created += 1
+            logger.info("Registered listing: %s", title)
+
+        await session.commit()
+
+    return created
+
+
 if __name__ == "__main__":
-    count = asyncio.run(seed_clinics())
-    logger.info("Seed complete: %d clinic(s) created.", count)
+    clinics = asyncio.run(seed_clinics())
+    listings = asyncio.run(seed_properties())
+    logger.info(
+        "Seed complete: %d clinic(s) and %d listing(s) created.",
+        clinics,
+        listings,
+    )

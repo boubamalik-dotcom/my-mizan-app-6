@@ -71,7 +71,9 @@ def _columns(database: Path, table: str) -> List[str]:
 #: Kept as an explicit list rather than derived, so adding a table is a
 #: deliberate edit here; `test_the_post_baseline_table_list_is_current`
 #: fails loudly if someone forgets.
-POST_BASELINE_TABLES = frozenset({"clinics", "queue_reservations"})
+POST_BASELINE_TABLES = frozenset(
+    {"clinics", "queue_reservations", "properties"}
+)
 
 #: The tables migration `0001` creates — everything a database stamped
 #: at the baseline is expected to already have.

@@ -33,6 +33,7 @@ from config import get_settings
 # fails if the two ever drift apart.
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.models import message_model  # noqa: F401
+from src.layer_5_storage.models import property_model  # noqa: F401
 from src.layer_5_storage.models import queue_model  # noqa: F401
 from src.layer_5_storage.models import transaction_ledger_model  # noqa: F401
 from src.layer_5_storage.models import user_model  # noqa: F401

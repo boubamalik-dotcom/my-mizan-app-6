@@ -19,6 +19,7 @@ from config import get_settings
 from src.layer_2_api.audit.audit_controller import AuditController
 from src.layer_2_api.auth.auth_controller import AuthController
 from src.layer_2_api.controllers.chat_controller import ChatController
+from src.layer_2_api.controllers.property_controller import PropertyController
 from src.layer_2_api.controllers.queue_controller import QueueController
 from src.layer_2_api.controllers.wallet_controller import WalletController
 from src.layer_2_api.main_router import api_router
@@ -110,6 +111,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         unit_of_work_factory=UnitOfWork,
     )
 
+    # Read-only, so no broadcaster and nothing to invalidate: the
+    # search rules live in Layer 3 and the paging ceiling with them.
+    property_controller = PropertyController(unit_of_work_factory=UnitOfWork)
+
     # Shares the chat engine's Redis broker rather than opening a
     # second one: both features need the same cross-process fan-out,
     # and channel names are namespaced (`queue:{clinic_id}`) so their
@@ -128,6 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.wallet_controller = wallet_controller
     app.state.auth_controller = auth_controller
     app.state.audit_controller = audit_controller
+    app.state.property_controller = property_controller
     app.state.queue_controller = queue_controller
     app.state.queue_broadcaster = queue_broadcaster
     # Exposed separately (not just via `auth_controller`) so the Chat
