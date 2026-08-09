@@ -8,6 +8,7 @@ import 'package:mizan_frontend/features/chat/presentation/state/chat_cubit.dart'
 import 'package:mizan_frontend/features/chat/presentation/state/chat_state.dart';
 import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
 import 'package:mizan_frontend/mini_programs/mizan_door/data/datasources/queue_local_datasource.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/data/datasources/queue_socket_data_source.dart';
 import 'package:mizan_frontend/mini_programs/mizan_door/domain/entities/queue_reservation.dart';
 import 'package:mizan_frontend/mini_programs/mizan_door/presentation/bloc/queue_bloc.dart';
 import 'package:mizan_frontend/mini_programs/mizan_door/domain/repositories/queue_repository.dart';
@@ -89,6 +90,10 @@ class _UnusedQueueRepository implements QueueRepository {
   @override
   Future<void> leaveQueue(String reservationId) =>
       throw UnimplementedError('the stub cubit never leaves');
+
+  @override
+  Stream<ClinicQueueUpdate> watchQueue(String clinicId) =>
+      const Stream<ClinicQueueUpdate>.empty();
 }
 
 void main() {

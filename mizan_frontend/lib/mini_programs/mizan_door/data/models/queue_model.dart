@@ -29,6 +29,9 @@ class QueueModel {
       waitingCount: requireInt(json, 'waiting_count'),
       averageServiceMinutes: requireInt(json, 'average_service_minutes'),
       isAcceptingPatients: json['is_accepting_patients'] as bool? ?? true,
+      nowServingTicket: json['now_serving_ticket'] is int
+          ? json['now_serving_ticket'] as int
+          : null,
     );
   }
 

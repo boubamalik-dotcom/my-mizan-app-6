@@ -7,6 +7,7 @@ class ClinicQueue {
     required this.waitingCount,
     required this.averageServiceMinutes,
     required this.isAcceptingPatients,
+    this.nowServingTicket,
   });
 
   final Clinic clinic;
@@ -22,6 +23,37 @@ class ClinicQueue {
   /// closed, or on a break. The queue is still worth showing so a
   /// patient can see *why* they cannot join.
   final bool isAcceptingPatients;
+
+  /// The ticket currently with the clinician, or `null` when the room
+  /// is free. This is the "now serving 42" figure a waiting room
+  /// displays; it is not counted in [waitingCount], which means people
+  /// still to be called.
+  final int? nowServingTicket;
+
+  /// A copy with the pushed figures replaced, for applying a live
+  /// socket update to a clinic already on screen.
+  ///
+  /// [clearNowServingTicket] exists because `null` cannot otherwise be
+  /// distinguished from "leave it as it was", and the room becoming
+  /// free is exactly the update that has to be expressible.
+  ClinicQueue copyWith({
+    int? waitingCount,
+    int? averageServiceMinutes,
+    bool? isAcceptingPatients,
+    int? nowServingTicket,
+    bool clearNowServingTicket = false,
+  }) {
+    return ClinicQueue(
+      clinic: clinic,
+      waitingCount: waitingCount ?? this.waitingCount,
+      averageServiceMinutes:
+          averageServiceMinutes ?? this.averageServiceMinutes,
+      isAcceptingPatients: isAcceptingPatients ?? this.isAcceptingPatients,
+      nowServingTicket: clearNowServingTicket
+          ? null
+          : (nowServingTicket ?? this.nowServingTicket),
+    );
+  }
 
   /// Roughly how long a patient joining now would wait.
   ///

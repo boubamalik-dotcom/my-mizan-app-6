@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/data/datasources/queue_socket_data_source.dart';
 import 'package:mizan_frontend/mini_programs/mizan_door/data/repositories/queue_repository_impl.dart';
 import 'package:mizan_frontend/mini_programs/mizan_door/domain/entities/clinic.dart';
 import 'package:mizan_frontend/mini_programs/mizan_door/domain/entities/clinic_queue.dart';
@@ -72,6 +73,10 @@ void main() {
 
   setUp(() {
     repository = MockQueueRepository();
+    // Live updates are covered in `queue_live_updates_test.dart`; here
+    // an empty stream keeps the socket out of the way of layout tests.
+    when(() => repository.watchQueue(any()))
+        .thenAnswer((_) => const Stream<ClinicQueueUpdate>.empty());
     stubQueues(<ClinicQueue>[_queue()]);
   });
 

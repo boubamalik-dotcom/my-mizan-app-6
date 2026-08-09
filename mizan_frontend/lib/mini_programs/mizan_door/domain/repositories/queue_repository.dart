@@ -1,3 +1,4 @@
+import '../../data/datasources/queue_socket_data_source.dart';
 import '../entities/clinic_queue.dart';
 import '../entities/queue_reservation.dart';
 
@@ -37,4 +38,17 @@ abstract class QueueRepository {
 
   /// Gives up a reservation.
   Future<void> leaveQueue(String reservationId);
+
+  /// A live stream of `clinicId`'s queue state, for as long as the
+  /// subscription is held.
+  ///
+  /// Reconnects on its own if the socket drops, so a caller never has
+  /// to distinguish "nothing has changed" from "the connection died" —
+  /// which is the distinction a screen would otherwise get wrong,
+  /// showing a frozen number as though it were current.
+  ///
+  /// The stream carries only the clinic's aggregate figures. A caller
+  /// that needs the patient's own position re-reads [fetchQueues],
+  /// because the server deliberately never puts a patient on the wire.
+  Stream<ClinicQueueUpdate> watchQueue(String clinicId);
 }

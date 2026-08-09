@@ -85,14 +85,20 @@ class QueueCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          Row(
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
             children: <Widget>[
               _WaitingCount(count: queue.waitingCount),
-              const SizedBox(width: AppSpacing.sm),
               WaitTimeBadge(
                 minutes: queue.estimatedWaitMinutes,
                 isAccepting: queue.isAcceptingPatients,
               ),
+              // Only while someone is actually with the clinician. A
+              // permanent "now serving —" placeholder would be noise on
+              // the many clinics whose room is empty.
+              if (queue.nowServingTicket != null)
+                _NowServing(ticket: queue.nowServingTicket!),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
@@ -156,6 +162,45 @@ class QueueCard extends StatelessWidget {
               ),
             )
           : const Text('احجز دورك'),
+    );
+  }
+}
+
+/// The ticket currently with the clinician — the "now serving 42" a
+/// waiting room displays.
+class _NowServing extends StatelessWidget {
+  const _NowServing({required this.ticket});
+
+  final int ticket;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: MizanColors.success.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(AppRadius.card / 2),
+        border: Border.all(color: MizanColors.success.withOpacity(0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Icon(
+            Icons.meeting_room_outlined,
+            size: 14,
+            color: MizanColors.success,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            'يُخدم الآن رقم $ticket',
+            style: const TextStyle(
+              color: MizanColors.navy,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

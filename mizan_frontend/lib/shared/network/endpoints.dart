@@ -77,6 +77,28 @@ class ApiEndpoints {
   static String clinicReservation(String reservationId) =>
       '/queues/reservations/${Uri.encodeComponent(reservationId)}';
 
+  /// The live-updates socket for one clinic's queue.
+  ///
+  /// The server pushes a frame whenever that clinic's queue changes —
+  /// someone joins, someone cancels, or reception calls the next
+  /// patient. The frame carries the clinic's aggregate state only
+  /// (`waiting_count`, `now_serving_ticket`, …) and **nothing about any
+  /// patient**, so a client wanting its own position still reads
+  /// `GET /queues` with its token.
+  ///
+  /// `token` goes in the query string because browser `WebSocket` APIs
+  /// cannot send an `Authorization` header — the same reason the chat
+  /// socket does it.
+  static Uri clinicQueueWebSocket({
+    required String clinicId,
+    required String token,
+  }) {
+    return Uri.parse(
+      '$webSocketBaseUrl/queues/ws/${Uri.encodeComponent(clinicId)}'
+      '?token=${Uri.encodeQueryComponent(token)}',
+    );
+  }
+
   // -- Chat (REST) --------------------------------------------------------
 
   /// `GET` — a room's recent messages, oldest first. Requires a

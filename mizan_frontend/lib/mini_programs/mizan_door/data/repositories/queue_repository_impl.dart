@@ -5,6 +5,7 @@ import '../../domain/entities/queue_reservation.dart';
 import '../../domain/repositories/queue_repository.dart';
 import '../datasources/queue_local_datasource.dart';
 import '../datasources/queue_remote_datasource.dart';
+import '../datasources/queue_socket_data_source.dart';
 
 /// Thrown when the queue API is not deployed yet and the caller asked
 /// for something that cannot be faked.
@@ -27,11 +28,14 @@ class QueueRepositoryImpl implements QueueRepository {
   QueueRepositoryImpl({
     QueueRemoteDataSource? remoteDataSource,
     QueueLocalDataSource localDataSource = const QueueLocalDataSource(),
+    QueueSocketDataSource? socketDataSource,
   })  : _remoteDataSource = remoteDataSource ?? QueueRemoteDataSource(),
-        _localDataSource = localDataSource;
+        _localDataSource = localDataSource,
+        _socketDataSource = socketDataSource ?? QueueSocketDataSource();
 
   final QueueRemoteDataSource _remoteDataSource;
   final QueueLocalDataSource _localDataSource;
+  final QueueSocketDataSource _socketDataSource;
 
   @override
   Future<QueueSnapshot> fetchQueues() async {
@@ -83,6 +87,10 @@ class QueueRepositoryImpl implements QueueRepository {
       throw _mapReservationError(error);
     }
   }
+
+  @override
+  Stream<ClinicQueueUpdate> watchQueue(String clinicId) =>
+      _socketDataSource.watch(clinicId);
 
   /// Whether the failure means "this API isn't deployed yet" as opposed
   /// to "the request failed".
