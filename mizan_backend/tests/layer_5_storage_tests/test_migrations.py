@@ -62,15 +62,48 @@ def _columns(database: Path, table: str) -> List[str]:
         connection.close()
 
 
+#: Tables introduced by a migration *after* the baseline. A database
+#: already deployed at `BASELINE_REVISION` does not have them, so
+#: `_create_legacy_schema` must not create them either — otherwise the
+#: migration that adds them fails with "table already exists" against a
+#: database that, in reality, would not have had it.
+#:
+#: Kept as an explicit list rather than derived, so adding a table is a
+#: deliberate edit here; `test_the_post_baseline_table_list_is_current`
+#: fails loudly if someone forgets.
+POST_BASELINE_TABLES = frozenset({"clinics", "queue_reservations"})
+
+#: The tables migration `0001` creates — everything a database stamped
+#: at the baseline is expected to already have.
+BASELINE_TABLES = frozenset(
+    {
+        "users",
+        "wallets",
+        "transaction_ledger",
+        "chat_threads",
+        "chat_participants",
+        "chat_messages",
+    }
+)
+
+
 def _create_legacy_schema(database: Path) -> None:
-    """Builds a database in the pre-RBAC shape: everything the models
-    declare *except* the two columns migration 0002 adds.
+    """Builds a database in the pre-RBAC shape: the baseline's tables,
+    *without* the two columns migration 0002 adds and without any table
+    a later migration introduces.
 
     This is what an already-deployed database looks like, and the
     reason the chain starts with a baseline it can be stamped at.
     """
     engine = create_engine(f"sqlite:///{database}")
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            table
+            for name, table in Base.metadata.tables.items()
+            if name not in POST_BASELINE_TABLES
+        ],
+    )
 
     with engine.begin() as connection:
         # SQLite can drop a column since 3.35, which is enough to
@@ -93,14 +126,7 @@ class TestFreshDatabase:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         )
-        assert {
-            "users",
-            "wallets",
-            "transaction_ledger",
-            "chat_threads",
-            "chat_participants",
-            "chat_messages",
-        } <= tables
+        assert BASELINE_TABLES | POST_BASELINE_TABLES <= tables
 
     def test_the_rbac_columns_are_present(self, database: Path) -> None:
         command.upgrade(_alembic_config(database), "head")
@@ -138,6 +164,40 @@ class TestFreshDatabase:
 class TestExistingDatabase:
     """The path a deployed database takes: stamp the baseline it is
     already at, then upgrade."""
+
+    def test_the_post_baseline_table_list_is_current(self) -> None:
+        """`POST_BASELINE_TABLES` has to name every table added after
+        the baseline.
+
+        Miss one and `_create_legacy_schema` pre-creates it, so the
+        migration that adds it fails against a simulated deployed
+        database — a confusing "table already exists" that says nothing
+        about the real cause. This fails first, and says what to do.
+        """
+        assert set(Base.metadata.tables) == BASELINE_TABLES | POST_BASELINE_TABLES, (
+            "a table was added or removed: update BASELINE_TABLES / "
+            "POST_BASELINE_TABLES so the deployed-database tests keep "
+            "simulating a real upgrade path"
+        )
+
+    def test_a_new_table_is_created_on_an_existing_database(
+        self, database: Path
+    ) -> None:
+        # The upgrade path for `0003`: a database that predates clinic
+        # queues gains both tables without touching what was there.
+        _create_legacy_schema(database)
+
+        config = _alembic_config(database)
+        command.stamp(config, BASELINE_REVISION)
+        command.upgrade(config, "head")
+
+        tables = {
+            row[0]
+            for row in sqlite3.connect(database).execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert POST_BASELINE_TABLES <= tables
 
     def test_stamping_the_baseline_then_upgrading_adds_the_columns(
         self, database: Path
@@ -246,7 +306,11 @@ class TestReversibility:
         connection.commit()
         connection.close()
 
-        command.downgrade(config, "-1")
+        # An explicit target, not a relative "-1": the latter means
+        # "undo whatever happens to be head", so it silently retargets
+        # every time a migration is added and stops testing what this
+        # test is named after.
+        command.downgrade(config, BASELINE_REVISION)
 
         assert "role" not in _columns(database, "users")
         assert "direction" not in _columns(database, "transaction_ledger")
@@ -255,6 +319,25 @@ class TestReversibility:
             assert connection.execute("SELECT count(*) FROM users").fetchone()[0] == 1
         finally:
             connection.close()
+
+    def test_downgrading_clinic_queues_drops_only_its_own_tables(
+        self, database: Path
+    ) -> None:
+        config = _alembic_config(database)
+        command.upgrade(config, "head")
+
+        command.downgrade(config, "0002_rbac_role_and_ledger_direction")
+
+        tables = {
+            row[0]
+            for row in sqlite3.connect(database).execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert not (POST_BASELINE_TABLES & tables)
+        assert BASELINE_TABLES <= tables
+        # And the RBAC column the earlier migration added is untouched.
+        assert "role" in _columns(database, "users")
 
     def test_a_full_round_trip_returns_to_the_same_schema(
         self, database: Path

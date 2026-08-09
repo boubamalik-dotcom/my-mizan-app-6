@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...layer_5_storage.db_config import async_session_factory
 from ..repositories.audit_repository import AuditRepository
+from ..repositories.queue_repository import QueueRepository
 from ..repositories.user_repository import UserRepository
 from ..repositories.wallet_repository import WalletRepository
 
@@ -104,14 +105,17 @@ class UnitOfWork:
         self.wallets: Optional[WalletRepository] = None
         self.users: Optional[UserRepository] = None
         self.audit: Optional[AuditRepository] = None
+        self.queues: Optional[QueueRepository] = None
 
     async def __aenter__(self) -> "UnitOfWork":
         """Opens a new session/transaction and binds every repository
-        (`self.wallets`, `self.users`, `self.audit`) to it."""
+        (`self.wallets`, `self.users`, `self.audit`, `self.queues`) to
+        it."""
         self._session = self._session_factory()
         self.wallets = WalletRepository(self._session)
         self.users = UserRepository(self._session)
         self.audit = AuditRepository(self._session)
+        self.queues = QueueRepository(self._session)
         return self
 
     async def __aexit__(
@@ -139,6 +143,7 @@ class UnitOfWork:
                 self.wallets = None
                 self.users = None
                 self.audit = None
+                self.queues = None
 
     async def commit(self) -> None:
         """Durably commits every change made through this unit of

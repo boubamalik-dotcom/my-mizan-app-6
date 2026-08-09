@@ -19,6 +19,7 @@ from config import get_settings
 from src.layer_2_api.audit.audit_controller import AuditController
 from src.layer_2_api.auth.auth_controller import AuthController
 from src.layer_2_api.controllers.chat_controller import ChatController
+from src.layer_2_api.controllers.queue_controller import QueueController
 from src.layer_2_api.controllers.wallet_controller import WalletController
 from src.layer_2_api.main_router import api_router
 from src.layer_3_business.audit.audit_service import AuditService
@@ -108,11 +109,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         unit_of_work_factory=UnitOfWork,
     )
 
+    # No Layer 3 service injected, unlike the wallet: the queue's rules
+    # all have to run inside the clinic row lock, so they are consulted
+    # from `QueueRepository.join_queue` instead.
+    queue_controller = QueueController(unit_of_work_factory=UnitOfWork)
+
     app.state.message_broker = message_broker
     app.state.chat_controller = chat_controller
     app.state.wallet_controller = wallet_controller
     app.state.auth_controller = auth_controller
     app.state.audit_controller = audit_controller
+    app.state.queue_controller = queue_controller
     # Exposed separately (not just via `auth_controller`) so the Chat
     # WebSocket route can validate a `?token=` query parameter without
     # a database round trip — see

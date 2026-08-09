@@ -73,6 +73,41 @@ async def get_current_user(
 _authorization_service = AuthorizationService()
 
 
+#: The same scheme with `auto_error` off, for endpoints that serve
+#: anonymous callers but say more to a signed-in one. Without this a
+#: missing `Authorization` header would be rejected with a 401 by the
+#: scheme itself, before the route could decide it did not mind.
+_optional_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="Optional JWT access token issued by POST /auth/login.",
+)
+
+
+async def get_current_user_or_none(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(
+        _optional_bearer_scheme
+    ),
+    controller: AuthController = Depends(get_auth_controller),
+) -> Optional[UserRecord]:
+    """FastAPI dependency resolving the caller if they presented a
+    usable token, and `None` otherwise.
+
+    For endpoints that are public but personalised — `GET /queues` is
+    the first: anyone may see how long the queues are, and a signed-in
+    patient additionally gets their own place in one.
+
+    Deliberately never raises. A malformed, expired, or revoked token
+    yields `None`, the same as no token at all, so a stale credential
+    degrades a personalised response to a public one instead of
+    locking the caller out of a page that does not require them to be
+    anyone in particular. Endpoints that *do* require an identity must
+    use `get_current_user`, which rejects exactly those cases.
+    """
+    if credentials is None:
+        return None
+    return await controller.resolve_user_or_none(credentials.credentials)
+
+
 def resolve_role(user: UserRecord) -> Role:
     """Resolves a persisted role string to Layer 3's `Role`.
 
