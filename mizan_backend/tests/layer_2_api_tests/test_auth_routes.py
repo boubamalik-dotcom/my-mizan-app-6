@@ -273,7 +273,16 @@ class TestOpenApiDocumentation:
             for path, methods in schema["paths"].items()
             if path.startswith("/api/v1/auth")
         }
-        assert len(auth_paths) == 3
+        # Named rather than counted: a bare count tells you the number
+        # changed, not which endpoint appeared or vanished, and an
+        # endpoint silently disappearing from the auth surface is worth
+        # a specific failure.
+        assert set(auth_paths) == {
+            "/api/v1/auth/register",
+            "/api/v1/auth/login",
+            "/api/v1/auth/logout",
+            "/api/v1/auth/me",
+        }
 
         for path, methods in auth_paths.items():
             for method, operation in methods.items():

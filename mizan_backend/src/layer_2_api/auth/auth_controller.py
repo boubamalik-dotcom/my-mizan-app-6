@@ -29,7 +29,8 @@ from ...layer_3_business.auth.auth_exceptions import (
     InvalidTokenError,
     UserAlreadyExistsError,
 )
-from ...layer_3_business.auth.auth_service import AuthService
+from ...layer_3_business.auth.auth_service import AuthService, TokenPayload
+from ...layer_4_data_access.cache.token_blocklist import TokenBlocklist
 from ...layer_4_data_access.repositories.user_repository import UserRecord
 from ...layer_4_data_access.uow.transaction_manager import UnitOfWork
 
@@ -46,6 +47,7 @@ class AuthController:
         unit_of_work_factory: Callable[[], UnitOfWork] = UnitOfWork,
         authorization_service: Optional[AuthorizationService] = None,
         bootstrap_admin_emails: Iterable[str] = (),
+        token_blocklist: Optional[TokenBlocklist] = None,
     ) -> None:
         """
         Args:
@@ -63,11 +65,18 @@ class AuthController:
                 registration, from `config.Settings`. See
                 `AuthorizationService.initial_role_for` for why this
                 exists at all.
+            token_blocklist: Where revoked tokens are recorded. `None`
+                disables revocation entirely — every syntactically valid
+                token stays usable until it expires, and `logout`
+                becomes a no-op. Only appropriate for a deployment that
+                has consciously accepted that; the composition root
+                always supplies one.
         """
         self._auth_service = auth_service
         self._unit_of_work_factory = unit_of_work_factory
         self._authorization_service = authorization_service or AuthorizationService()
         self._bootstrap_admin_emails = tuple(bootstrap_admin_emails)
+        self._token_blocklist = token_blocklist
 
     async def register(
         self, *, email: str, password: str, full_name: str
@@ -171,6 +180,11 @@ class AuthController:
         with self._translate_domain_errors():
             payload = self._auth_service.decode_access_token(token)
 
+            if await self._is_revoked(payload):
+                raise InvalidTokenError(
+                    "This access token has been revoked. Please sign in again."
+                )
+
             async with self._unit_of_work_factory() as uow:
                 user = await uow.users.get_user_by_email(payload.subject)
 
@@ -204,6 +218,12 @@ class AuthController:
         except InvalidTokenError:
             return None
 
+        # Checked here too, not just on the REST path: a revoked token
+        # that could still open a WebSocket would be revoked in name
+        # only, since the socket outlives the request that opened it.
+        if await self._is_revoked(payload):
+            return None
+
         async with self._unit_of_work_factory() as uow:
             user = await uow.users.get_user_by_email(payload.subject)
 
@@ -211,7 +231,61 @@ class AuthController:
             return None
         return user
 
+    async def logout(self, token: str) -> None:
+        """Revokes `token`, so it stops working before it expires.
+
+        Signing out has to mean something server-side. A JWT is valid
+        because it verifies, not because a server remembers it, so
+        "logging out" by deleting the client's copy leaves a fully
+        working credential in every log, proxy cache, and browser
+        history it ever passed through — usable until its `exp`.
+
+        The blocklist entry lives exactly as long as the token has left
+        (Layer 3's `seconds_until_expiry`), so the store stays bounded
+        by active sessions rather than growing with every logout.
+
+        Idempotent: revoking an already-revoked, already-expired, or
+        unrecognised-but-well-formed token succeeds quietly. A client
+        that cannot reliably log out will retry, and a second attempt
+        must not fail.
+
+        Raises:
+            HTTPException: 401 if the token is malformed, expired, or
+                has an invalid signature — there is nothing to revoke.
+        """
+        with self._translate_domain_errors():
+            payload = self._auth_service.decode_access_token(token)
+
+        if self._token_blocklist is None:
+            return
+
+        if payload.token_id is None:
+            # Issued before tokens carried a `jti`. It cannot be revoked
+            # individually, and blocking by any other property would
+            # mean blocking every token that shares it. Such a token
+            # expires on its own within the access-token lifetime.
+            return
+
+        ttl_seconds = payload.seconds_until_expiry()
+        if ttl_seconds <= 0:
+            return
+
+        await self._token_blocklist.revoke(
+            payload.token_id, ttl_seconds=ttl_seconds
+        )
+
     # -- Internal helpers -------------------------------------------------
+
+    async def _is_revoked(self, payload: TokenPayload) -> bool:
+        """Whether this specific token has been revoked.
+
+        A token with no `jti` was issued before revocation existed and
+        cannot appear in the blocklist, so it is treated as not
+        revoked — the honest reading, and it still expires on its own.
+        """
+        if self._token_blocklist is None or payload.token_id is None:
+            return False
+        return await self._token_blocklist.is_revoked(payload.token_id)
 
     @staticmethod
     @contextmanager

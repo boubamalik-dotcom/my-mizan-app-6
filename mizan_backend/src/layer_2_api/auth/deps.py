@@ -7,9 +7,9 @@ module exists.
 """
 from __future__ import annotations
 
-from typing import Callable, Coroutine
+from typing import Callable, Coroutine, Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ...layer_3_business.authz.authorization_service import AuthorizationService
@@ -18,6 +18,7 @@ from ...layer_3_business.authz.authz_exceptions import (
     PermissionDeniedError,
 )
 from ...layer_3_business.authz.roles import Permission, Role
+from ...layer_4_data_access.cache.rate_limiter import RateLimiter
 from ...layer_4_data_access.repositories.user_repository import UserRecord
 from .auth_controller import AuthController
 
@@ -88,6 +89,96 @@ def resolve_role(user: UserRecord) -> Role:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="The account's role is not recognised by this server.",
         ) from exc
+
+
+async def get_bearer_token(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+) -> str:
+    """The raw bearer token, for the one route that needs the credential
+    itself rather than the user behind it.
+
+    `POST /auth/logout` revokes a specific token, so it needs the string
+    that was presented — `get_current_user` deliberately discards it.
+    """
+    return credentials.credentials
+
+
+def rate_limited(
+    *,
+    scope: str,
+    attempts: int,
+    window_seconds: int,
+) -> Callable[..., Coroutine[None, None, None]]:
+    """Builds a dependency that throttles a route by client IP.
+
+    Applied to the unauthenticated endpoints, which are the ones an
+    attacker can hammer without first obtaining anything: `login` is a
+    password oracle, and `register` is free account creation.
+
+    Keyed on `scope` as well as the address, so exhausting the login
+    limit does not also lock the caller out of registering.
+
+    Answers **429** with `Retry-After`, and adds `X-RateLimit-*` headers
+    so a well-behaved client can back off before being refused.
+    """
+
+    async def dependency(request: Request, response: Response) -> None:
+        limiter: Optional[RateLimiter] = getattr(
+            request.app.state, "rate_limiter", None
+        )
+        if limiter is None:
+            # No limiter configured: the composition root always supplies
+            # one, so this is a bare test app rather than a production
+            # path. Throttling nothing is the right behaviour for a test
+            # that is not about throttling.
+            return
+
+        decision = await limiter.check(
+            f"{scope}:{_client_identifier(request)}",
+            limit=attempts,
+            window_seconds=window_seconds,
+        )
+
+        response.headers["X-RateLimit-Limit"] = str(attempts)
+        response.headers["X-RateLimit-Remaining"] = str(decision.remaining)
+
+        if not decision.allowed:
+            # Repeated on the exception: raising discards the `Response`
+            # above and builds a fresh one, so headers set there never
+            # reach a refused caller — which is exactly the caller who
+            # needs to know when to retry.
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "Too many attempts. Please wait "
+                    f"{decision.retry_after_seconds} seconds and try again."
+                ),
+                headers={
+                    "Retry-After": str(decision.retry_after_seconds),
+                    "X-RateLimit-Limit": str(attempts),
+                    "X-RateLimit-Remaining": "0",
+                },
+            )
+
+    return dependency
+
+
+def _client_identifier(request: Request) -> str:
+    """The address a rate limit is counted against.
+
+    Uses the peer address only, and deliberately **ignores
+    `X-Forwarded-For`**. Behind a reverse proxy that header is the real
+    client, but it is also caller-supplied: trusting it without a
+    trusted-proxy allowlist lets an attacker send a different value on
+    every request and bypass the limit entirely — strictly worse than
+    having no limit, because it looks like there is one.
+
+    A deployment behind a proxy should configure the ASGI server's
+    `--forwarded-allow-ips` (which rewrites `request.client` from a
+    header it is told to trust) rather than reading the header here.
+    """
+    client = request.client
+    return client.host if client is not None else "unknown"
 
 
 def require_permission(

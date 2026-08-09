@@ -14,6 +14,8 @@ module never performs any I/O itself.
 """
 from __future__ import annotations
 
+import math
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -40,6 +42,12 @@ SUBJECT_CLAIM = "sub"
 EXPIRES_AT_CLAIM = "exp"
 ISSUED_AT_CLAIM = "iat"
 
+#: Unique id for one issued token, so a single token can be revoked
+#: without invalidating every other token the same user holds (and
+#: without the blocklist ever storing the token itself, which would be
+#: a store of live credentials).
+TOKEN_ID_CLAIM = "jti"
+
 
 @dataclass(frozen=True, slots=True)
 class TokenPayload:
@@ -48,6 +56,28 @@ class TokenPayload:
     subject: str
     issued_at: datetime
     expires_at: datetime
+
+    #: This token's unique id, used as its blocklist key on logout.
+    #: `None` for a token issued before the claim existed; such a token
+    #: cannot be revoked individually, so callers treat its absence as
+    #: "not revocable" rather than "not revoked" — see
+    #: `AuthController.logout`.
+    token_id: Optional[str] = None
+
+    def seconds_until_expiry(self, *, now: Optional[datetime] = None) -> int:
+        """Whole seconds until this token expires, never negative.
+
+        The lifetime a revocation entry needs: keeping a blocklist entry
+        past the token's own expiry wastes memory to block something
+        that is already refused on its `exp` claim alone. Rounded up, so
+        a token with a fraction of a second left is still blocked for
+        that fraction.
+        """
+        reference = now or datetime.now(timezone.utc)
+        remaining = (self.expires_at - reference).total_seconds()
+        if remaining <= 0:
+            return 0
+        return int(math.ceil(remaining))
 
 
 class AuthService:
@@ -159,6 +189,9 @@ class AuthService:
             SUBJECT_CLAIM: subject,
             ISSUED_AT_CLAIM: issued_at,
             EXPIRES_AT_CLAIM: expires_at,
+            # Random per token, so revoking one session does not sign
+            # the user out of their other devices.
+            TOKEN_ID_CLAIM: uuid.uuid4().hex,
         }
         if additional_claims:
             payload.update(additional_claims)
@@ -201,8 +234,11 @@ class AuthService:
                 "The access token is missing required timestamp claims."
             )
 
+        token_id = payload.get(TOKEN_ID_CLAIM)
+
         return TokenPayload(
             subject=subject,
             issued_at=datetime.fromtimestamp(issued_at_timestamp, tz=timezone.utc),
             expires_at=datetime.fromtimestamp(expires_at_timestamp, tz=timezone.utc),
+            token_id=token_id if isinstance(token_id, str) and token_id else None,
         )

@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
 from src.layer_2_api.audit.audit_controller import AuditController
@@ -24,6 +25,8 @@ from src.layer_3_business.audit.audit_service import AuditService
 from src.layer_3_business.auth.auth_service import AuthService
 from src.layer_3_business.chat.chat_service import ChatService, MessageRateLimiter
 from src.layer_3_business.wallet.wallet_service import WalletService
+from src.layer_4_data_access.cache.rate_limiter import RedisRateLimiter
+from src.layer_4_data_access.cache.token_blocklist import RedisTokenBlocklist
 from src.layer_4_data_access.events.message_broker import RedisMessageBroker
 from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.db_config import init_models
@@ -76,8 +79,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         unit_of_work_factory=UnitOfWork,
     )
 
+    token_blocklist = RedisTokenBlocklist(settings.redis_url)
+    await token_blocklist.connect()
+
+    rate_limiter = RedisRateLimiter(settings.redis_url)
+    await rate_limiter.connect()
+
     auth_service = AuthService(
-        secret_key=settings.jwt_secret_key,
+        # Resolved rather than read: raises in production when unset or
+        # too short, so the process never serves forgeable tokens.
+        secret_key=settings.resolved_jwt_secret_key,
         algorithm=settings.jwt_algorithm,
         access_token_expire_minutes=settings.access_token_expire_minutes,
     )
@@ -89,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             for email in settings.bootstrap_admin_emails.split(",")
             if email.strip()
         ],
+        token_blocklist=token_blocklist,
     )
 
     audit_controller = AuditController(
@@ -106,6 +118,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # a database round trip — see
     # `layer_2_api/routes/chat_routes.py::get_auth_service_ws`.
     app.state.auth_service = auth_service
+    app.state.token_blocklist = token_blocklist
+    # Resolved per request by the `rate_limited` dependency.
+    app.state.rate_limiter = rate_limiter
 
     logger.info("%s started (environment=%s)", settings.app_name, settings.environment)
     try:
@@ -113,12 +128,42 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         await chat_controller.shutdown()
         await message_broker.disconnect()
+        await token_blocklist.disconnect()
+        await rate_limiter.disconnect()
         logger.info("%s shut down cleanly.", settings.app_name)
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    # Before anything is wired: a deployment missing a signing key, or
+    # allowing every origin to make credentialed requests, must fail
+    # here with a specific message rather than start and be quietly
+    # insecure.
+    settings.validate_for_startup()
+
     app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
+
+    # Browsers refuse cross-origin requests unless the server opts in,
+    # so without this the Flutter *web* build cannot reach the API at
+    # all — every call surfaces to the client as a generic network
+    # error with nothing in the server log to explain it.
+    #
+    # `allow_credentials=True` is what lets the browser send the
+    # `Authorization` header cross-origin. It is also why
+    # `validate_for_startup` refuses a wildcard in production: the pair
+    # together would invite any site to act as a signed-in user.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        # So a browser can read the throttling headers the auth routes
+        # set; they are useless to a client that cannot see them.
+        expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
+    )
+
     app.include_router(api_router, prefix="/api/v1")
 
     @app.get("/health", tags=["health"])

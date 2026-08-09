@@ -8,7 +8,9 @@ contain either.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
+
+from config import get_settings
 
 from ...layer_3_business.authz.roles import Role
 from ...layer_4_data_access.repositories.user_repository import UserRecord
@@ -20,7 +22,17 @@ from .auth_schemas import (
     TokenResponse,
     UserResponse,
 )
-from .deps import get_auth_controller, get_current_user
+from .deps import (
+    get_auth_controller,
+    get_bearer_token,
+    get_current_user,
+    rate_limited,
+)
+
+#: Read once at import time: the limits are deployment configuration,
+#: not per-request state, and `Depends` objects are built when the route
+#: is declared.
+_settings = get_settings()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -42,7 +54,19 @@ def _to_user_response(user: UserRecord) -> UserResponse:
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
-    responses={400: {"model": ErrorResponse, "description": "Email already registered."}},
+    responses={
+        400: {"model": ErrorResponse, "description": "Email already registered."},
+        429: {"model": ErrorResponse, "description": "Too many attempts."},
+    },
+    dependencies=[
+        Depends(
+            rate_limited(
+                scope="register",
+                attempts=_settings.register_rate_limit_attempts,
+                window_seconds=_settings.register_rate_limit_window_seconds,
+            )
+        )
+    ],
     summary="Register a new user account",
     description=(
         "Creates a new user account. The password is hashed with "
@@ -72,8 +96,18 @@ async def register(
     "/login",
     response_model=TokenResponse,
     responses={
-        401: {"model": ErrorResponse, "description": "Invalid email or password."}
+        401: {"model": ErrorResponse, "description": "Invalid email or password."},
+        429: {"model": ErrorResponse, "description": "Too many attempts."},
     },
+    dependencies=[
+        Depends(
+            rate_limited(
+                scope="login",
+                attempts=_settings.login_rate_limit_attempts,
+                window_seconds=_settings.login_rate_limit_window_seconds,
+            )
+        )
+    ],
     summary="Authenticate and obtain a JWT access token",
     description=(
         "Verifies the given email/password against a registered, "
@@ -120,3 +154,31 @@ async def get_my_profile(
     Requires a valid `Authorization: Bearer <token>` header.
     """
     return _to_user_response(current_user)
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={401: {"model": ErrorResponse, "description": "Missing or invalid token."}},
+    summary="Revoke the caller's access token",
+    description=(
+        "Revokes the bearer token used to make this request, so it "
+        "stops working immediately rather than remaining valid until "
+        "it expires.\n\n"
+        "This matters because a JWT is accepted on the strength of its "
+        "signature, not because a server remembers issuing it — so "
+        "discarding the client's copy leaves a fully working credential "
+        "behind in logs, proxy caches, and browser history. The token's "
+        "id is recorded in a shared blocklist for exactly its remaining "
+        "lifetime.\n\n"
+        "Only this token is affected; the user's other sessions keep "
+        "working. Safe to call more than once."
+    ),
+)
+async def logout(
+    token: str = Depends(get_bearer_token),
+    controller: AuthController = Depends(get_auth_controller),
+) -> Response:
+    """Revoke the access token presented with this request."""
+    await controller.logout(token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
