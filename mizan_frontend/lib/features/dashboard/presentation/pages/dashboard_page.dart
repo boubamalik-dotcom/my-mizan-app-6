@@ -156,7 +156,14 @@ class HostDashboardPage extends StatelessWidget {
                           title: 'Mizan Door',
                           subtitle: 'طابور العيادات',
                           icon: _registry.getById('mizan_door').icon,
-                          onTap: () => _openMiniProgram(context, 'mizan_door'),
+                          // Straight to the named route rather than
+                          // through the mini-program loader: Mizan Door
+                          // has a real screen now, so there is nothing
+                          // to lazily resolve. The card already carries
+                          // its own InkWell, so its onTap is retargeted
+                          // rather than a second one nested inside it.
+                          onTap: () => Navigator.of(context)
+                              .pushNamed(CoreRoutes.mizanDoor),
                         ),
                         const SizedBox(height: AppSpacing.xl),
 

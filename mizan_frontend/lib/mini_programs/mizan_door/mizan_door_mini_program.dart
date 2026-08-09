@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/mini_program_loader/mini_program_base.dart';
-import '../../shared/design_system/widgets/mini_program_placeholder_page.dart';
+import 'presentation/pages/queue_dashboard_page.dart';
 
 /// Entry point for the Mizan Door mini-program: clinic queue
 /// reservations and live wait-time displays.
@@ -16,8 +16,12 @@ import '../../shared/design_system/widgets/mini_program_placeholder_page.dart';
 /// (registry, loader, navigator) ever references directly. Its
 /// feature UI lives under `presentation/`, domain rules under
 /// `domain/`, and persistence under `data/`, fully isolated from the
-/// other mini-programs — none of that is imported here yet, so this
-/// entry point currently renders a placeholder page.
+/// other mini-programs.
+///
+/// [buildRootWidget] returns the same `QueueDashboardPage` that
+/// `CoreRoutes.mizanDoor` renders, so reaching the mini-program through
+/// the loader and reaching it by route land on one screen rather than
+/// diverging.
 class MizanDoorMiniProgram extends BaseMiniProgram {
   @override
   String get id => 'mizan_door';
@@ -36,11 +40,6 @@ class MizanDoorMiniProgram extends BaseMiniProgram {
 
   @override
   Widget buildRootWidget(BuildContext context) {
-    return MiniProgramPlaceholderPage(
-      title: title,
-      description: description,
-      icon: icon,
-      accentColor: accentColor,
-    );
+    return const QueueDashboardPage();
   }
 }

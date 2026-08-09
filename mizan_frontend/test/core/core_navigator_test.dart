@@ -7,6 +7,12 @@ import 'package:mizan_frontend/features/auth/presentation/pages/login_page.dart'
 import 'package:mizan_frontend/features/chat/presentation/state/chat_cubit.dart';
 import 'package:mizan_frontend/features/chat/presentation/state/chat_state.dart';
 import 'package:mizan_frontend/features/dashboard/presentation/pages/dashboard_page.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/data/datasources/queue_local_datasource.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/domain/entities/queue_reservation.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/presentation/bloc/queue_bloc.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/domain/repositories/queue_repository.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/presentation/bloc/queue_state.dart';
+import 'package:mizan_frontend/mini_programs/mizan_door/presentation/pages/queue_dashboard_page.dart';
 import 'package:mizan_frontend/mini_programs/oran_real_estate/presentation/pages/property_listing_page.dart';
 import 'package:mizan_frontend/features/wallet/data/wallet_model.dart';
 import 'package:mizan_frontend/features/wallet/presentation/state/wallet_cubit.dart';
@@ -56,6 +62,33 @@ class _StubChatCubit extends ChatCubit {
   Future<void> initializeChat() async {
     emit(const ChatConnected(unreadCount: 3));
   }
+}
+
+/// A [QueueDashboardCubit] that never touches the network: it emits a
+/// fixed state instead of running the real repository call.
+class _StubQueueCubit extends QueueDashboardCubit {
+  _StubQueueCubit(this._fixed) : super(repository: _UnusedQueueRepository());
+
+  final QueueState _fixed;
+
+  @override
+  Future<void> loadQueues() async => emit(_fixed);
+}
+
+/// Never called: [_StubQueueCubit] overrides every method that would
+/// reach it.
+class _UnusedQueueRepository implements QueueRepository {
+  @override
+  Future<QueueSnapshot> fetchQueues() =>
+      throw UnimplementedError('the stub cubit never loads');
+
+  @override
+  Future<QueueReservation> joinQueue(String clinicId) =>
+      throw UnimplementedError('the stub cubit never joins');
+
+  @override
+  Future<void> leaveQueue(String reservationId) =>
+      throw UnimplementedError('the stub cubit never leaves');
 }
 
 void main() {
@@ -139,16 +172,19 @@ void main() {
   });
 
   testWidgets(
-      'tapping the Mizan Door card lazily loads and opens the mini-program',
+      'tapping the Tawazun card lazily loads and opens the mini-program',
       (WidgetTester tester) async {
+    // Tawazun is the only mini-program still resolved through the
+    // loader: Mizan Door and Oran Real Estate both have real screens
+    // now and their cards push named routes directly.
     await pumpDashboard(tester);
 
-    await tester.tap(find.text('Mizan Door'));
+    await tester.tap(find.text('Tawazun Freight AI'));
     // Let the mini-program's (fake, instant) initialize() future resolve
     // and its root widget build.
     await tester.pumpAndSettle();
 
-    expect(find.text('Clinic queue reservations & wait times'), findsWidgets);
+    expect(find.text('AI-powered logistics & freight tracking'), findsWidgets);
   });
 
   testWidgets(
@@ -205,15 +241,38 @@ void main() {
     expect(oran.buildRootWidget(context), isA<PropertyListingPage>());
   });
 
-  testWidgets('mizan_door screen never surfaces QR/payment related UI',
+  testWidgets('the real mizan_door screen never surfaces QR/payment related UI',
       (WidgetTester tester) async {
-    await pumpDashboard(tester);
-
-    await tester.tap(find.text('Mizan Door'));
+    // Scans the actual queue screen — including a reservation banner
+    // and every clinic card — rather than the placeholder this used to
+    // land on. Mizan Door is scoped to queue management only; anything
+    // payment-related belongs to the Digital Wallet feature.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QueueDashboardPage(
+          queueCubit: _StubQueueCubit(
+            QueueLoaded(
+              queues: const QueueLocalDataSource().showcaseQueues(),
+              reservation: QueueReservation(
+                id: 'r1',
+                clinicId: 'clinic-001',
+                clinicName: 'عيادة الأمل للطب العام',
+                position: 2,
+                estimatedWaitMinutes: 16,
+                joinedAt: DateTime(2026, 1, 1),
+              ),
+              isShowcaseData: true,
+            ),
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     final Iterable<Text> textWidgets =
         tester.widgetList<Text>(find.byType(Text));
+    expect(textWidgets, isNotEmpty, reason: 'the screen rendered nothing');
+
     for (final Text textWidget in textWidgets) {
       final String? value = textWidget.data?.toLowerCase();
       if (value == null) continue;
@@ -221,8 +280,7 @@ void main() {
         expect(
           value.contains(forbidden),
           isFalse,
-          reason: 'Found forbidden term "$forbidden" in Mizan Door text: '
-              '"$value"',
+          reason: 'mizan_door must not mention "$forbidden": "$value"',
         );
       }
     }

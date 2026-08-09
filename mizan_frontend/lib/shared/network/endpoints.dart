@@ -59,6 +59,24 @@ class ApiEndpoints {
   /// to live data the moment the endpoint ships.
   static const String properties = '/properties';
 
+  // -- Mizan Door (clinic queues) -----------------------------------------
+
+  /// `GET` — every clinic's current queue, plus the caller's own
+  /// reservation if they hold one.
+  ///
+  /// Not implemented in `mizan_backend` yet: `QueueRepository` falls
+  /// back to a bundled showcase catalogue while this 404s, and switches
+  /// to live data the moment the endpoint ships.
+  static const String clinicQueues = '/queues';
+
+  /// `POST` — take a place in a clinic's queue.
+  static String joinClinicQueue(String clinicId) =>
+      '/queues/${Uri.encodeComponent(clinicId)}/reservations';
+
+  /// `DELETE` — give up a reservation.
+  static String clinicReservation(String reservationId) =>
+      '/queues/reservations/${Uri.encodeComponent(reservationId)}';
+
   // -- Chat (REST) --------------------------------------------------------
 
   /// `GET` — a room's recent messages, oldest first. Requires a

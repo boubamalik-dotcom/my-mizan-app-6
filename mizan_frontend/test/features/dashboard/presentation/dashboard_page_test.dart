@@ -109,6 +109,13 @@ void main() {
             builder: (_) => const Scaffold(body: Text('OPENED_CHAT_ROOM')),
           );
         }
+        if (settings.name == CoreRoutes.mizanDoor) {
+          // Stubbed; `queue_dashboard_page_test.dart` covers the page.
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const Scaffold(body: Text('OPENED_MIZAN_DOOR')),
+          );
+        }
         if (settings.name == CoreRoutes.realEstate) {
           // Stubbed likewise; `property_listing_page_test.dart` covers
           // the page.
@@ -360,14 +367,17 @@ void main() {
   });
 
   group('navigation', () {
-    testWidgets('tapping the Mizan Door card opens it by id',
+    testWidgets('tapping the Mizan Door card opens the queue route',
         (WidgetTester tester) async {
+      // Like Oran Real Estate, Mizan Door has a real screen now, so its
+      // card goes straight to the named route instead of through the
+      // mini-program loader. Tawazun below still uses the loader.
       await pumpDashboard(tester);
 
       await tester.tap(find.text('Mizan Door'));
       await tester.pumpAndSettle();
 
-      expect(find.text('OPENED_MINI_PROGRAM:mizan_door'), findsOneWidget);
+      expect(find.text('OPENED_MIZAN_DOOR'), findsOneWidget);
     });
 
     testWidgets('tapping the Tawazun Freight AI card opens it by id',
