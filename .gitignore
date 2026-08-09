@@ -60,4 +60,15 @@ mobile_app/.pub-cache/
 mobile_app/.pub/
 mobile_app/**/Generated.xcconfig
 mobile_app/**/flutter_export_environment.sh
+
+mizan_frontend/.dart_tool/
+mizan_frontend/.flutter-plugins
+mizan_frontend/.flutter-plugins-dependencies
+mizan_frontend/.packages
+mizan_frontend/build/
+mizan_frontend/.pub-cache/
+mizan_frontend/.pub/
+mizan_frontend/**/Generated.xcconfig
+mizan_frontend/**/flutter_export_environment.sh
+
 *.iml
