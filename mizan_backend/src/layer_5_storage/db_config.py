@@ -98,8 +98,20 @@ async_session_factory: async_sessionmaker[AsyncSession] = build_session_factory(
 async def init_models(bind_engine: Optional[AsyncEngine] = None) -> None:
     """Creates all tables known to `Base.metadata`.
 
-    Intended for local development and automated tests; production
-    deployments should apply versioned Alembic migrations instead.
+    For automated tests and throwaway local databases only. This is
+    `create_all`, which creates tables that do not yet exist and
+    **silently ignores every table that does** — it will not add a
+    column, change a type, or drop anything. Against a database that
+    already has the old shape it does nothing at all and reports
+    success, so the first sign of trouble is a query failing on a
+    missing column at runtime.
+
+    Versioned migrations are the answer for anything holding data::
+
+        alembic upgrade head
+
+    `main.py` therefore only calls this when `auto_create_schema` is
+    enabled, which it is not by default.
     """
     target_engine = bind_engine or engine
     async with target_engine.begin() as connection:

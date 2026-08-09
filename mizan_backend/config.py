@@ -31,6 +31,20 @@ class Settings(BaseSettings):
     # Layer 5 — storage
     database_url: str = "sqlite+aiosqlite:///./mizan_backend.db"
 
+    #: Whether startup should run `create_all` to build any missing
+    #: tables.
+    #:
+    #: Off by default, and it should stay off anywhere that holds data.
+    #: `create_all` only ever *creates* tables that do not exist; it
+    #: silently skips tables that do, so it cannot add a column to one
+    #: — it would quietly leave a database on an old schema and report
+    #: success, which is exactly how `users.role` came to be missing at
+    #: runtime. Deployments run `alembic upgrade head` instead.
+    #:
+    #: Useful for a disposable local database where running migrations
+    #: first is friction rather than safety.
+    auto_create_schema: bool = False
+
     # Layer 4 — cache / pub-sub broker
     redis_url: str = "redis://localhost:6379/0"
 

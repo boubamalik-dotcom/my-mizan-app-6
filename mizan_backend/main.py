@@ -39,7 +39,18 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
 
-    await init_models()
+    # Deliberately not unconditional: `create_all` cannot alter an
+    # existing table, so running it against a database on an older
+    # schema succeeds while changing nothing, and the missing column
+    # only surfaces later as a failing query. Schema changes are
+    # applied by `alembic upgrade head`; see `alembic.ini`.
+    if settings.auto_create_schema:
+        logger.warning(
+            "auto_create_schema is enabled: creating any missing tables with "
+            "create_all. This cannot apply schema changes to existing "
+            "tables — run 'alembic upgrade head' for that."
+        )
+        await init_models()
 
     message_broker = RedisMessageBroker(settings.redis_url)
     await message_broker.connect()
