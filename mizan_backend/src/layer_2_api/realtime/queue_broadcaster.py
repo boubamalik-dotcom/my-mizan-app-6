@@ -48,6 +48,12 @@ logger = logging.getLogger(__name__)
 #: chat room id, which shares the same broker.
 CHANNEL_PREFIX = "queue"
 
+#: How long `connect` waits for a clinic's relay to be genuinely
+#: subscribed before giving up and accepting the socket anyway. Bounded
+#: so a broker outage degrades to "connected but no live updates"
+#: rather than hanging the handshake.
+RELAY_READY_TIMEOUT_SECONDS = 5.0
+
 #: The single event this feature publishes. Named in the payload rather
 #: than implied, so a client can ignore anything it does not recognise
 #: and a second event type can be added later without ambiguity.
@@ -101,6 +107,7 @@ class QueueBroadcaster:
         self._broker = broker
         self._connections = connection_manager or ConnectionManager()
         self._relay_tasks: Dict[str, asyncio.Task[None]] = {}
+        self._relay_ready: Dict[str, asyncio.Event] = {}
         self._relay_lock = asyncio.Lock()
 
     # -- Publishing ------------------------------------------------------
@@ -138,9 +145,30 @@ class QueueBroadcaster:
     ) -> None:
         """Accepts `websocket` and subscribes it to `clinic_id`'s
         updates, starting this process's relay for that clinic if it is
-        the first connection to it."""
+        the first connection to it.
+
+        Returns only once the relay is genuinely subscribed. Spawning
+        the relay and returning immediately would leave a window — the
+        socket is open, but the Redis ``SUBSCRIBE`` behind it has not
+        landed yet — in which an update is published and simply lost. It
+        is a narrow window and precisely the one a client hits: a screen
+        that connects and immediately joins a queue would miss the very
+        update it caused, then sit there looking stale.
+        """
         await self._connections.connect(clinic_id, client_id, websocket)
-        await self._ensure_relay_task(clinic_id)
+        ready = await self._ensure_relay_task(clinic_id)
+        try:
+            await asyncio.wait_for(ready.wait(), RELAY_READY_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            # The socket stays open: the client still gets everything
+            # from its next REST read onwards, which beats refusing the
+            # connection outright.
+            logger.warning(
+                "Queue relay for clinic %s was not ready within %.0fs; the "
+                "socket is connected but may miss updates until it is.",
+                clinic_id,
+                RELAY_READY_TIMEOUT_SECONDS,
+            )
 
     async def disconnect(self, *, clinic_id: str, client_id: str) -> None:
         """Unregisters a socket, and stops the clinic's relay once the
@@ -157,26 +185,40 @@ class QueueBroadcaster:
 
         async with self._relay_lock:
             task = self._relay_tasks.pop(clinic_id, None)
+            self._relay_ready.pop(clinic_id, None)
         if task is not None:
             task.cancel()
 
-    async def _ensure_relay_task(self, clinic_id: str) -> None:
+    async def _ensure_relay_task(self, clinic_id: str) -> asyncio.Event:
         """Starts the Redis→WebSocket relay for `clinic_id` unless one
         is already running, so N connections to one clinic share a
-        single subscription."""
+        single subscription.
+
+        Returns the event the relay sets once its subscription is live,
+        so the caller can wait for it.
+        """
         async with self._relay_lock:
             existing = self._relay_tasks.get(clinic_id)
             if existing is not None and not existing.done():
-                return
+                return self._relay_ready[clinic_id]
+
+            ready = asyncio.Event()
+            self._relay_ready[clinic_id] = ready
             self._relay_tasks[clinic_id] = asyncio.create_task(
                 self._relay_loop(clinic_id), name=f"queue-relay-{clinic_id}"
             )
+            return ready
 
     async def _relay_loop(self, clinic_id: str) -> None:
         """Forwards everything published for `clinic_id` to the sockets
         this process holds for it."""
+        ready = self._relay_ready.get(clinic_id)
         try:
             async with self._broker.subscribe(channel_for(clinic_id)) as updates:
+                # Subscribed for real by this point: the broker performs
+                # the Redis SUBSCRIBE before yielding.
+                if ready is not None:
+                    ready.set()
                 async for payload in updates:
                     await self._connections.broadcast_local(
                         clinic_id, dict(payload)
@@ -205,3 +247,4 @@ class QueueBroadcaster:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._relay_tasks.clear()
+        self._relay_ready.clear()

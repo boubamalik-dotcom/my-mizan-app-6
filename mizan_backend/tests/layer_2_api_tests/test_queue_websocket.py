@@ -226,6 +226,28 @@ class TestLiveDelivery:
         assert frame["now_serving_ticket"] == 1
         assert frame["waiting_count"] == 0
 
+    def test_an_update_immediately_after_connecting_is_not_lost(
+        self, client: TestClient
+    ) -> None:
+        # No pause between opening the socket and causing the change.
+        # Before `connect` waited for the relay's subscription to be
+        # live, this raced: the socket was open while the Redis
+        # SUBSCRIBE behind it had not landed, so a screen that connected
+        # and immediately joined a queue missed the very update it
+        # caused and then sat there looking stale.
+        token = _login(client, email="patient@example.com")
+        clinic_id = _clinic(client, token)
+
+        with client.websocket_connect(
+            f"/api/v1/queues/ws/{clinic_id}?token={token}"
+        ) as socket:
+            client.post(
+                f"/api/v1/queues/{clinic_id}/reservations", headers=_auth(token)
+            )
+            frame = socket.receive_json()
+
+        assert frame["waiting_count"] == 1
+
     def test_the_frame_names_no_patient(self, client: TestClient) -> None:
         # The constraint that matters. Asserted on a real frame off a
         # real socket, not just on the payload builder.
