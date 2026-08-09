@@ -7,10 +7,10 @@ import '../../../shared/exceptions/network_exception.dart';
 import 'chat_message.dart';
 import 'chat_remote_data_source.dart';
 
-// Re-exported so the presentation layer can name the room it is showing
-// without importing the data source directly — everything above the data
-// layer depends on this repository alone.
-export 'chat_remote_data_source.dart' show kDefaultChatRoomId;
+// Re-exported so the presentation layer can derive the room it is
+// showing without importing the data source directly — everything above
+// the data layer depends on this repository alone.
+export 'chat_remote_data_source.dart' show privateChatRoomId;
 
 /// Data-layer gateway to the real-time Chat engine.
 ///
@@ -67,8 +67,12 @@ class ChatRepository {
       (_messageController ??= StreamController<ChatMessage>.broadcast()).stream;
 
   /// Connects the chat socket as [clientId] (the user's email — see
-  /// [ChatRemoteDataSource.connect]) and returns a stream of the
-  /// running unread count.
+  /// [ChatRemoteDataSource.connect]) into [roomId], and returns a
+  /// stream of the running unread count.
+  ///
+  /// [roomId] must be the caller's own private room
+  /// ([privateChatRoomId] of their user id); the backend closes the
+  /// socket with a policy violation for any other room.
   ///
   /// The returned stream mirrors the socket's own lifecycle, which is
   /// what lets `ChatCubit` map it straight onto its states:
@@ -80,10 +84,16 @@ class ChatRepository {
   ///
   /// Throws `ChatConnectionException` if the handshake cannot even be
   /// attempted (e.g. no stored token).
-  Future<Stream<int>> connect({required String clientId}) async {
+  Future<Stream<int>> connect({
+    required String clientId,
+    required String roomId,
+  }) async {
     await disconnect();
 
-    final Stream<dynamic> frames = await _remoteDataSource.connect(clientId);
+    final Stream<dynamic> frames = await _remoteDataSource.connect(
+      clientId,
+      roomId: roomId,
+    );
 
     _clientId = clientId;
     _unreadCount = 0;
@@ -128,7 +138,7 @@ class ChatRepository {
   /// Throws [NetworkException] with a display-ready Arabic message.
   Future<List<ChatMessage>> fetchHistory({
     required String clientId,
-    String roomId = kDefaultChatRoomId,
+    required String roomId,
     int limit = 50,
   }) async {
     try {

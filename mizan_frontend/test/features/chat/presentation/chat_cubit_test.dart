@@ -34,8 +34,10 @@ void main() {
 
     when(() => authRepository.getCurrentUser())
         .thenAnswer((_) async => _testUser);
-    when(() => chatRepository.connect(clientId: any(named: 'clientId')))
-        .thenAnswer((_) async => unreadCounts.stream);
+    when(() => chatRepository.connect(
+          clientId: any(named: 'clientId'),
+          roomId: any(named: 'roomId'),
+        )).thenAnswer((_) async => unreadCounts.stream);
     when(() => chatRepository.disconnect()).thenAnswer((_) async {});
     when(() => chatRepository.markAllAsRead()).thenReturn(null);
 
@@ -55,12 +57,56 @@ void main() {
   });
 
   test(
-      'initializeChat connects as the user\'s email (the JWT subject the '
-      'backend authorizes against), not their id', () async {
+      'initializeChat connects as the user\'s email into the room named '
+      'after their id', () async {
+    // Two different identifiers on purpose: the backend authorizes the
+    // client id against the JWT subject (the email), and scopes the room
+    // by user id (which cannot change under the user the way an email
+    // can).
     await cubit.initializeChat();
 
-    verify(() => chatRepository.connect(clientId: 'alice@example.com'))
-        .called(1);
+    verify(() => chatRepository.connect(
+          clientId: 'alice@example.com',
+          roomId: 'private_user-1',
+        )).called(1);
+  });
+
+  test('initializeChat never connects to a shared room', () async {
+    // The vulnerability this replaced: every client joined `general`,
+    // and because history is scoped per room, that made every user's
+    // messages readable by every other user. A regression here would
+    // reopen it, so it is asserted directly rather than only implied by
+    // the positive case above.
+    await cubit.initializeChat();
+
+    final String room = verify(() => chatRepository.connect(
+          clientId: any(named: 'clientId'),
+          roomId: captureAny(named: 'roomId'),
+        )).captured.single as String;
+
+    expect(room, 'private_user-1');
+    expect(room, isNot('general'));
+    expect(room, contains(_testUser.id));
+  });
+
+  test('a different user gets a different room', () async {
+    // Nothing about the room is global: it is a function of who is
+    // signed in.
+    when(() => authRepository.getCurrentUser()).thenAnswer(
+      (_) async => const AuthUser(
+        id: 'user-2',
+        email: 'bob@example.com',
+        fullName: 'Bob',
+        isActive: true,
+      ),
+    );
+
+    await cubit.initializeChat();
+
+    verify(() => chatRepository.connect(
+          clientId: 'bob@example.com',
+          roomId: 'private_user-2',
+        )).called(1);
   });
 
   test('initializeChat emits [ChatConnecting, ChatConnected] on success',
@@ -112,8 +158,10 @@ void main() {
   });
 
   test('a ChatConnectionException surfaces its own Arabic message', () async {
-    when(() => chatRepository.connect(clientId: any(named: 'clientId')))
-        .thenThrow(const ChatConnectionException('يجب تسجيل الدخول أولاً.'));
+    when(() => chatRepository.connect(
+          clientId: any(named: 'clientId'),
+          roomId: any(named: 'roomId'),
+        )).thenThrow(const ChatConnectionException('يجب تسجيل الدخول أولاً.'));
 
     await cubit.initializeChat();
 
@@ -132,8 +180,10 @@ void main() {
   });
 
   test('an unexpected error falls back to a generic Arabic message', () async {
-    when(() => chatRepository.connect(clientId: any(named: 'clientId')))
-        .thenThrow(StateError('boom'));
+    when(() => chatRepository.connect(
+          clientId: any(named: 'clientId'),
+          roomId: any(named: 'roomId'),
+        )).thenThrow(StateError('boom'));
 
     await cubit.initializeChat();
 
@@ -173,13 +223,17 @@ void main() {
   });
 
   test('initializeChat can be called again to retry after an error', () async {
-    when(() => chatRepository.connect(clientId: any(named: 'clientId')))
-        .thenThrow(const ChatConnectionException('تعذّر الاتصال.'));
+    when(() => chatRepository.connect(
+          clientId: any(named: 'clientId'),
+          roomId: any(named: 'roomId'),
+        )).thenThrow(const ChatConnectionException('تعذّر الاتصال.'));
     await cubit.initializeChat();
     expect(cubit.state, isA<ChatError>());
 
-    when(() => chatRepository.connect(clientId: any(named: 'clientId')))
-        .thenAnswer((_) async => unreadCounts.stream);
+    when(() => chatRepository.connect(
+          clientId: any(named: 'clientId'),
+          roomId: any(named: 'roomId'),
+        )).thenAnswer((_) async => unreadCounts.stream);
     await cubit.initializeChat();
 
     expect(cubit.state, isA<ChatConnected>());

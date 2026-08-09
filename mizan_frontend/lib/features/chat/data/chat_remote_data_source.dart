@@ -14,14 +14,24 @@ import 'chat_message.dart';
 /// a fake channel instead of opening a real socket.
 typedef WebSocketChannelFactory = WebSocketChannel Function(Uri uri);
 
-/// The room every dashboard connection joins for now.
+/// The id of the signed-in user's own private chat room.
 ///
-/// The backend requires a `room_id` on every socket (there is no
-/// server-side default), but the app has no per-conversation UI yet —
-/// so until real room/conversation management lands, all clients share
-/// this one well-known room. Named rather than inlined so that change
-/// is a one-line edit.
-const String kDefaultChatRoomId = 'general';
+/// Must match the backend's rule exactly — see
+/// `layer_3_business/chat/room_access.py`, which derives the same name
+/// and refuses any request for a room that is not the caller's own.
+///
+/// Built from the user's **id**, never their email. An email can change,
+/// and a room named after one would either strand the history under the
+/// old address or hand the next owner of a recycled address someone
+/// else's messages.
+///
+/// This replaces a hardcoded shared room (`general`) that every client
+/// connected to. Because history is scoped per room, that made every
+/// user's messages readable by every other user. There is deliberately
+/// **no default** anywhere in this file now: a caller that cannot say
+/// which room it means gets a compile error rather than quietly falling
+/// back to a shared one.
+String privateChatRoomId(String userId) => 'private_$userId';
 
 /// Owns the Chat transport — the raw WebSocket plus the REST history
 /// call. The only place in the Chat feature that touches
@@ -66,7 +76,7 @@ class ChatRemoteDataSource {
   /// is not logged in) or the handshake itself fails.
   Future<Stream<dynamic>> connect(
     String clientId, {
-    String roomId = kDefaultChatRoomId,
+    required String roomId,
   }) async {
     await disconnect();
 
@@ -130,7 +140,7 @@ class ChatRemoteDataSource {
   /// translate.
   Future<List<ChatMessage>> fetchHistory({
     required String clientId,
-    String roomId = kDefaultChatRoomId,
+    required String roomId,
     int limit = 50,
   }) async {
     final Response<dynamic> response = await _apiClient.get(

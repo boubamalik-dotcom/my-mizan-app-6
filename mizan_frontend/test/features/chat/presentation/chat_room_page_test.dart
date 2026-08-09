@@ -16,6 +16,11 @@ import 'package:mizan_frontend/shared/design_system/theme/color_scheme.dart';
 import 'package:mizan_frontend/shared/exceptions/network_exception.dart';
 import 'package:mocktail/mocktail.dart';
 
+/// The signed-in test user's own room. `ChatRoomCubit` derives this from
+/// the authenticated profile now, so a fixture has to match what
+/// `privateChatRoomId(user.id)` produces for the stubbed user.
+const String _testRoom = 'private_user-1';
+
 class MockChatRepository extends Mock implements ChatRepository {}
 
 class MockAuthRepository extends Mock implements AuthRepository {}
@@ -34,7 +39,7 @@ ChatMessage _message({
 }) {
   return ChatMessage.fromJson(<String, dynamic>{
     'id': id,
-    'room_id': kDefaultChatRoomId,
+    'room_id': _testRoom,
     'sender_id': senderId,
     'content': content,
     'type': 'text',

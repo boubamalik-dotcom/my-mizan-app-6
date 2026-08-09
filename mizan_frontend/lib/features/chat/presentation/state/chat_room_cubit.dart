@@ -20,14 +20,25 @@ class ChatRoomCubit extends Cubit<ChatRoomState> {
   ChatRoomCubit({
     ChatRepository? chatRepository,
     AuthRepository? authRepository,
-    this.roomId = kDefaultChatRoomId,
   })  : _chatRepository = chatRepository ?? ChatRepository.instance,
         _authRepository = authRepository ?? AuthRepository.instance,
         super(const ChatRoomLoading());
 
   final ChatRepository _chatRepository;
   final AuthRepository _authRepository;
-  final String roomId;
+
+  /// The room this screen is showing, derived from the signed-in user
+  /// in [loadRoom] rather than accepted from a caller.
+  ///
+  /// Deliberately not a constructor parameter: it used to default to a
+  /// shared room, which is what let every user read every other user's
+  /// messages. Nothing outside this cubit gets to name the room, so
+  /// nothing can point the screen at someone else's.
+  String? _roomId;
+
+  /// The room currently being shown, or `null` before [loadRoom]
+  /// resolves the user.
+  String? get roomId => _roomId;
 
   StreamSubscription<ChatMessage>? _messageSubscription;
 
@@ -41,17 +52,25 @@ class ChatRoomCubit extends Cubit<ChatRoomState> {
 
     try {
       final AuthUser user = await _authRepository.getCurrentUser();
+      // The user's own room, and the only one the backend will serve
+      // them. Resolved here, from the authenticated profile, so the
+      // screen cannot be aimed anywhere else.
+      final String room = privateChatRoomId(user.id);
+      _roomId = room;
 
       // The dashboard normally has the socket open already. Only
       // connect when it does not — reconnecting would replace the
       // streams its `ChatCubit` listens to and darken its badge.
       if (!_chatRepository.isConnected) {
-        await _chatRepository.connect(clientId: user.email);
+        await _chatRepository.connect(
+          clientId: user.email,
+          roomId: room,
+        );
       }
 
       final List<ChatMessage> history = await _chatRepository.fetchHistory(
         clientId: user.email,
-        roomId: roomId,
+        roomId: room,
       );
       if (isClosed) return;
 
@@ -101,7 +120,7 @@ class ChatRoomCubit extends Cubit<ChatRoomState> {
         if (isClosed) return;
         final ChatRoomState current = state;
         if (current is! ChatRoomReady) return;
-        if (message.roomId != roomId) return;
+        if (message.roomId != _roomId) return;
         if (!message.isConversational) return;
         // The same message can arrive twice when a history fetch races
         // the socket; identity is the server-assigned id.

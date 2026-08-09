@@ -32,14 +32,19 @@ class ChatCubit extends Cubit<ChatState> {
 
   StreamSubscription<int>? _unreadSubscription;
 
-  /// Resolves the authenticated user's identity, then opens the chat
-  /// socket as that identity.
+  /// Resolves the authenticated user, then opens the chat socket as
+  /// that identity into their own private room.
   ///
   /// `client_id` must be the user's **email**, not their id: the
   /// backend authorizes the socket by comparing it against the JWT's
   /// subject, which `AuthController.login` sets to the email. So this
   /// asks `AuthRepository.getCurrentUser()` for the profile first
   /// rather than guessing.
+  ///
+  /// The **room** is derived from the user's id
+  /// ([privateChatRoomId]). Nothing here may fall back to a shared
+  /// room: doing so is what previously made every user's messages
+  /// readable by every other user.
   ///
   /// Safe to call again to retry after a [ChatError] or
   /// [ChatDisconnected] — `ChatRepository.connect` tears any previous
@@ -49,8 +54,14 @@ class ChatCubit extends Cubit<ChatState> {
 
     try {
       final AuthUser user = await _authRepository.getCurrentUser();
-      final Stream<int> unreadCounts =
-          await _chatRepository.connect(clientId: user.email);
+      // Two different identifiers, deliberately: the socket connects as
+      // the user's **email** (the JWT subject the backend authorizes
+      // the client id against), into a room named after their **id**
+      // (which cannot change under them the way an email can).
+      final Stream<int> unreadCounts = await _chatRepository.connect(
+        clientId: user.email,
+        roomId: privateChatRoomId(user.id),
+      );
 
       if (isClosed) {
         // The dashboard was disposed mid-handshake; drop the socket

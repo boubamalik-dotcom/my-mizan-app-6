@@ -10,6 +10,11 @@ import 'package:mizan_frontend/features/chat/presentation/state/chat_room_state.
 import 'package:mizan_frontend/shared/exceptions/network_exception.dart';
 import 'package:mocktail/mocktail.dart';
 
+/// The signed-in test user's own room. `ChatRoomCubit` derives this from
+/// the authenticated profile now, so a fixture has to match what
+/// `privateChatRoomId(user.id)` produces for the stubbed user.
+const String _testRoom = 'private_user-1';
+
 class MockChatRepository extends Mock implements ChatRepository {}
 
 class MockAuthRepository extends Mock implements AuthRepository {}
@@ -25,7 +30,7 @@ ChatMessage _message({
   required String id,
   String senderId = 'bob@example.com',
   String content = 'مرحبا',
-  String roomId = kDefaultChatRoomId,
+  String roomId = _testRoom,
   String type = 'text',
 }) {
   return ChatMessage.fromJson(<String, dynamic>{
@@ -100,7 +105,7 @@ void main() {
       verify(
         () => chatRepository.fetchHistory(
           clientId: 'alice@example.com',
-          roomId: kDefaultChatRoomId,
+          roomId: _testRoom,
         ),
       ).called(1);
     });
@@ -142,19 +147,25 @@ void main() {
 
       // Reconnecting would replace the streams the dashboard's ChatCubit
       // listens to and darken its badge.
-      verifyNever(
-          () => chatRepository.connect(clientId: any(named: 'clientId')));
+      verifyNever(() => chatRepository.connect(
+            clientId: any(named: 'clientId'),
+            roomId: any(named: 'roomId'),
+          ));
     });
 
     test('opens a socket when none is connected yet', () async {
       when(() => chatRepository.isConnected).thenReturn(false);
-      when(() => chatRepository.connect(clientId: any(named: 'clientId')))
-          .thenAnswer((_) async => const Stream<int>.empty());
+      when(() => chatRepository.connect(
+            clientId: any(named: 'clientId'),
+            roomId: any(named: 'roomId'),
+          )).thenAnswer((_) async => const Stream<int>.empty());
 
       await cubit.loadRoom();
 
-      verify(() => chatRepository.connect(clientId: 'alice@example.com'))
-          .called(1);
+      verify(() => chatRepository.connect(
+            clientId: 'alice@example.com',
+            roomId: _testRoom,
+          )).called(1);
     });
 
     test('clears the unread badge, since opening the room is reading it',
@@ -213,6 +224,50 @@ void main() {
 
       expect(cubit.state, isA<ChatRoomReady>());
       expect((cubit.state as ChatRoomReady).messages, hasLength(1));
+    });
+  });
+
+  group('room scoping', () {
+    test('fetches history for the signed-in user\'s own room only', () async {
+      await cubit.loadRoom();
+
+      verify(() => chatRepository.fetchHistory(
+            clientId: 'alice@example.com',
+            roomId: 'private_user-1',
+          )).called(1);
+    });
+
+    test('never asks for a shared room', () async {
+      // The vulnerability: every client used `general`, so history —
+      // which is scoped per room — returned everyone's messages.
+      await cubit.loadRoom();
+
+      final String room = verify(() => chatRepository.fetchHistory(
+            clientId: any(named: 'clientId'),
+            roomId: captureAny(named: 'roomId'),
+          )).captured.single as String;
+
+      expect(room, isNot('general'));
+      expect(room, 'private_user-1');
+    });
+
+    test('exposes the room it resolved, and nothing before that', () async {
+      // The room is no longer a constructor argument, so no caller can
+      // point this screen at somebody else's conversation.
+      expect(cubit.roomId, isNull);
+
+      await cubit.loadRoom();
+
+      expect(cubit.roomId, 'private_user-1');
+    });
+
+    test('ignores a message belonging to another room', () async {
+      await cubit.loadRoom();
+
+      incoming.add(_message(id: 'foreign', roomId: 'private_user-2'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect((cubit.state as ChatRoomReady).messages, isEmpty);
     });
   });
 

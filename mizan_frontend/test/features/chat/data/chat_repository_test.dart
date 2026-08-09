@@ -9,6 +9,10 @@ import 'package:mizan_frontend/features/chat/data/chat_remote_data_source.dart';
 import 'package:mizan_frontend/features/chat/data/chat_repository.dart';
 import 'package:mizan_frontend/shared/exceptions/network_exception.dart';
 
+/// The signed-in user's own room. Rooms are per-user now, so a test
+/// fixture has to name one rather than relying on a shared default.
+const String _testRoom = 'private_user-1';
+
 /// A [ChatRemoteDataSource] stand-in that hands the test direct
 /// control of the frame stream, so unread-counting can be exercised
 /// without a real WebSocket.
@@ -56,7 +60,7 @@ class FakeChatRemoteDataSource extends ChatRemoteDataSource {
   @override
   Future<List<ChatMessage>> fetchHistory({
     required String clientId,
-    String roomId = kDefaultChatRoomId,
+    required String roomId,
     int limit = 50,
   }) async {
     lastHistoryClientId = clientId;
@@ -77,7 +81,7 @@ class FakeChatRemoteDataSource extends ChatRemoteDataSource {
   @override
   Future<Stream<dynamic>> connect(
     String clientId, {
-    String roomId = kDefaultChatRoomId,
+    required String roomId,
   }) async {
     connectCallCount++;
     lastClientId = clientId;
@@ -110,7 +114,7 @@ String _messageFrame({required String senderId, String content = 'مرحبا'}) 
     'type': 'message',
     'data': <String, dynamic>{
       'id': 'm1',
-      'room_id': kDefaultChatRoomId,
+      'room_id': _testRoom,
       'sender_id': senderId,
       'content': content,
       'type': 'text',
@@ -134,7 +138,7 @@ void main() {
   });
 
   test('connect passes the client id through to the data source', () async {
-    await repository.connect(clientId: 'alice@example.com');
+    await repository.connect(clientId: 'alice@example.com', roomId: _testRoom);
 
     expect(dataSource.connectCallCount, 1);
     expect(dataSource.lastClientId, 'alice@example.com');
@@ -143,6 +147,7 @@ void main() {
   test('counts an incoming message from another participant', () async {
     final Stream<int> unread = await repository.connect(
       clientId: 'alice@example.com',
+      roomId: _testRoom,
     );
     final Future<List<int>> collected = unread.take(2).toList();
 
@@ -156,6 +161,7 @@ void main() {
   test("never counts the echo of the user's own message", () async {
     final Stream<int> unread = await repository.connect(
       clientId: 'alice@example.com',
+      roomId: _testRoom,
     );
     final Future<List<int>> collected = unread.take(1).toList();
 
@@ -170,6 +176,7 @@ void main() {
   test('ignores system, pong, error, and malformed frames', () async {
     final Stream<int> unread = await repository.connect(
       clientId: 'alice@example.com',
+      roomId: _testRoom,
     );
     final Future<List<int>> collected = unread.take(1).toList();
 
@@ -200,6 +207,7 @@ void main() {
   test('markAllAsRead resets the count and publishes the reset', () async {
     final Stream<int> unread = await repository.connect(
       clientId: 'alice@example.com',
+      roomId: _testRoom,
     );
     final Future<List<int>> collected = unread.take(2).toList();
 
@@ -214,6 +222,7 @@ void main() {
   test('closes the unread stream when the socket closes', () async {
     final Stream<int> unread = await repository.connect(
       clientId: 'alice@example.com',
+      roomId: _testRoom,
     );
     bool done = false;
     unread.listen(null, onDone: () => done = true);
@@ -227,6 +236,7 @@ void main() {
   test('forwards a socket error to the unread stream', () async {
     final Stream<int> unread = await repository.connect(
       clientId: 'alice@example.com',
+      roomId: _testRoom,
     );
     final Completer<Object> errorCompleter = Completer<Object>();
     unread.listen(null, onError: errorCompleter.complete);
@@ -237,7 +247,7 @@ void main() {
   });
 
   test('disconnect closes the socket and resets the count', () async {
-    await repository.connect(clientId: 'alice@example.com');
+    await repository.connect(clientId: 'alice@example.com', roomId: _testRoom);
     dataSource.frames.add(_messageFrame(senderId: 'bob@example.com'));
     await Future<void>.delayed(Duration.zero);
     expect(repository.unreadCount, 1);
@@ -249,8 +259,8 @@ void main() {
   });
 
   test('reconnecting tears the previous connection down first', () async {
-    await repository.connect(clientId: 'alice@example.com');
-    await repository.connect(clientId: 'alice@example.com');
+    await repository.connect(clientId: 'alice@example.com', roomId: _testRoom);
+    await repository.connect(clientId: 'alice@example.com', roomId: _testRoom);
 
     expect(dataSource.connectCallCount, 2);
     expect(dataSource.disconnectCallCount, greaterThanOrEqualTo(1));
@@ -265,6 +275,7 @@ void main() {
       // both must be served from the same listen() call.
       final Stream<int> unread = await repository.connect(
         clientId: 'alice@example.com',
+        roomId: _testRoom,
       );
       final Future<List<int>> unreadValues = unread.take(1).toList();
       final Future<List<ChatMessage>> messages =
@@ -287,7 +298,8 @@ void main() {
     });
 
     test('is a broadcast stream, so a second listener is allowed', () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
 
       expect(repository.incomingMessages.isBroadcast, isTrue);
       final Future<ChatMessage> first = repository.incomingMessages.first;
@@ -300,7 +312,8 @@ void main() {
 
     test('emits join/leave notices too, leaving the filtering to the UI',
         () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
       final Future<ChatMessage> next = repository.incomingMessages.first;
 
       dataSource.frames.add(
@@ -308,7 +321,7 @@ void main() {
           'type': 'system',
           'data': <String, dynamic>{
             'id': 'sys-1',
-            'room_id': kDefaultChatRoomId,
+            'room_id': _testRoom,
             'sender_id': 'system',
             'content': '"bob@example.com" joined the room.',
             'type': 'join',
@@ -324,7 +337,8 @@ void main() {
 
     test('drops pong, error, and malformed frames without killing the stream',
         () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
       final Future<ChatMessage> next = repository.incomingMessages.first;
 
       dataSource.frames.add(jsonEncode(<String, String>{'type': 'pong'}));
@@ -352,7 +366,8 @@ void main() {
       // anything, but the channel object lingers — so `isConnected` has
       // to be told, or the chat room believes a dead socket is up,
       // leaves its composer enabled, and sends into a closed sink.
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
       expect(repository.isConnected, isTrue);
 
       await dataSource.frames.close();
@@ -362,7 +377,8 @@ void main() {
     });
 
     test('stops reporting connected after a socket error', () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
       expect(repository.isConnected, isTrue);
 
       dataSource.frames.addError(StateError('socket died'));
@@ -374,7 +390,8 @@ void main() {
     test(
         'a message is refused once the socket has died, rather than being '
         'written into a dead sink', () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
 
       await dataSource.frames.close();
       await Future<void>.delayed(Duration.zero);
@@ -389,7 +406,8 @@ void main() {
 
   group('sendMessage', () {
     test('sends the backend\'s client -> server envelope', () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
 
       repository.sendMessage('السلام عليكم');
 
@@ -401,7 +419,8 @@ void main() {
     });
 
     test('trims the content before sending', () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
 
       repository.sendMessage('  مرحبا  ');
 
@@ -413,7 +432,8 @@ void main() {
     });
 
     test('rejects blank content instead of posting an empty message', () async {
-      await repository.connect(clientId: 'alice@example.com');
+      await repository.connect(
+          clientId: 'alice@example.com', roomId: _testRoom);
 
       expect(() => repository.sendMessage('   '), throwsArgumentError);
       expect(dataSource.sentFrames, isEmpty);
@@ -431,7 +451,7 @@ void main() {
   group('fetchHistory', () {
     ChatMessage message(String id) => ChatMessage.fromJson(<String, dynamic>{
           'id': id,
-          'room_id': kDefaultChatRoomId,
+          'room_id': _testRoom,
           'sender_id': 'bob@example.com',
           'content': 'مرحبا',
           'type': 'text',
@@ -443,13 +463,13 @@ void main() {
 
       final List<ChatMessage> history = await repository.fetchHistory(
         clientId: 'alice@example.com',
-        roomId: 'general',
+        roomId: _testRoom,
         limit: 25,
       );
 
       expect(history.map((ChatMessage m) => m.id), <String>['m1', 'm2']);
       expect(dataSource.lastHistoryClientId, 'alice@example.com');
-      expect(dataSource.lastHistoryRoomId, 'general');
+      expect(dataSource.lastHistoryRoomId, _testRoom);
       expect(dataSource.lastHistoryLimit, 25);
     });
 
@@ -466,7 +486,8 @@ void main() {
       );
 
       await expectLater(
-        () => repository.fetchHistory(clientId: 'alice@example.com'),
+        () => repository.fetchHistory(
+            clientId: 'alice@example.com', roomId: _testRoom),
         throwsA(
           isA<NetworkException>()
               .having((NetworkException e) => e.statusCode, 'statusCode', 403)
@@ -486,7 +507,8 @@ void main() {
       );
 
       await expectLater(
-        () => repository.fetchHistory(clientId: 'alice@example.com'),
+        () => repository.fetchHistory(
+            clientId: 'alice@example.com', roomId: _testRoom),
         throwsA(isA<NetworkException>()),
       );
     });
