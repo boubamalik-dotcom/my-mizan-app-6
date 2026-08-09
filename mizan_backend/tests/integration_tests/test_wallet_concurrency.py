@@ -30,7 +30,10 @@ from src.layer_4_data_access.repositories.wallet_repository import (
 from src.layer_4_data_access.uow.transaction_manager import UnitOfWork
 from src.layer_5_storage.base_model import Base
 from src.layer_5_storage.db_config import build_engine, build_session_factory
-from src.layer_5_storage.models.transaction_ledger_model import TransactionType
+from src.layer_5_storage.models.transaction_ledger_model import (
+    EntryDirection,
+    TransactionType,
+)
 
 WALLET_TEST_DATABASE_URL = os.environ.get(
     "WALLET_TEST_DATABASE_URL",
@@ -130,6 +133,7 @@ async def _deposit_with_retry(
                     wallet_id=wallet_id,
                     amount=amount,
                     transaction_type=TransactionType.DEPOSIT,
+                    direction=EntryDirection.CREDIT,
                 )
                 await uow.commit()
                 return
@@ -168,6 +172,7 @@ async def _withdraw_with_retry(
                     wallet_id=wallet_id,
                     amount=amount,
                     transaction_type=TransactionType.WITHDRAWAL,
+                    direction=EntryDirection.DEBIT,
                 )
                 await uow.commit()
                 return True
@@ -306,6 +311,7 @@ async def test_concurrent_transfers_conserve_total_funds_across_two_wallets(
                         wallet_id=sender_id,
                         amount=amount,
                         transaction_type=TransactionType.TRANSFER,
+                        direction=EntryDirection.DEBIT,
                         reference_id=reference_id,
                         counterparty_wallet_id=receiver_id,
                     )
@@ -313,6 +319,7 @@ async def test_concurrent_transfers_conserve_total_funds_across_two_wallets(
                         wallet_id=receiver_id,
                         amount=amount,
                         transaction_type=TransactionType.TRANSFER,
+                        direction=EntryDirection.CREDIT,
                         reference_id=reference_id,
                         counterparty_wallet_id=sender_id,
                     )
