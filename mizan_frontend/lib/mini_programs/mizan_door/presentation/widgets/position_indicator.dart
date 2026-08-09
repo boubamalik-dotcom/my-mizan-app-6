@@ -74,9 +74,11 @@ class PositionIndicator extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            reservation.isNext
-                ? 'أنت التالي'
-                : 'يسبقك ${reservation.position} أشخاص',
+            reservation.isInConsultation
+                ? 'حان دورك الآن'
+                : reservation.isNext
+                    ? 'أنت التالي'
+                    : 'يسبقك ${reservation.position} أشخاص',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 26,
@@ -94,14 +96,21 @@ class PositionIndicator extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: <Widget>[
-              const Icon(
-                Icons.hourglass_bottom_rounded,
+              Icon(
+                reservation.isInConsultation
+                    ? Icons.meeting_room_outlined
+                    : Icons.hourglass_bottom_rounded,
                 size: 15,
                 color: MizanColors.gold,
               ),
               const SizedBox(width: 5),
               Text(
-                'الوقت المتوقع: ${reservation.estimatedWaitMinutes} دقيقة',
+                // "Expected wait: 0 minutes" is technically true once a
+                // patient has been called in, and useless — it reads as
+                // though they are still queueing. Tell them to go in.
+                reservation.isInConsultation
+                    ? 'تفضّل بالدخول إلى العيادة'
+                    : 'الوقت المتوقع: ${reservation.estimatedWaitMinutes} دقيقة',
                 style: const TextStyle(
                   color: MizanColors.gold,
                   fontSize: 13,

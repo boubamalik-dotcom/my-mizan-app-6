@@ -39,13 +39,18 @@ ClinicQueue _queue({
   );
 }
 
-QueueReservation _reservation({int position = 2}) => QueueReservation(
+QueueReservation _reservation({
+  int position = 2,
+  bool isInConsultation = false,
+}) =>
+    QueueReservation(
       id: 'r1',
       clinicId: 'c1',
       clinicName: 'عيادة الأمل',
       position: position,
       estimatedWaitMinutes: 16,
       joinedAt: DateTime(2026),
+      isInConsultation: isInConsultation,
     );
 
 void main() {
@@ -301,6 +306,25 @@ void main() {
         tester.getCenter(find.byType(PositionIndicator)).dy,
         lessThan(tester.getCenter(find.byType(QueueCard)).dy),
       );
+    });
+
+    testWidgets('reads as "your turn now" once the clinic calls you in',
+        (WidgetTester tester) async {
+      // A patient who has been called in is not "next" — they are being
+      // seen. Telling them to keep waiting would send them back to
+      // their chair.
+      stubQueues(
+        <ClinicQueue>[_queue()],
+        reservation: _reservation(position: 0, isInConsultation: true),
+      );
+
+      await pumpPage(tester);
+
+      expect(find.text('حان دورك الآن'), findsOneWidget);
+      expect(find.text('أنت التالي'), findsNothing);
+      expect(find.text('تفضّل بالدخول إلى العيادة'), findsOneWidget);
+      // "Expected wait: 0 minutes" is true but useless at that point.
+      expect(find.textContaining('الوقت المتوقع'), findsNothing);
     });
 
     testWidgets('reads as "you are next" at the front',

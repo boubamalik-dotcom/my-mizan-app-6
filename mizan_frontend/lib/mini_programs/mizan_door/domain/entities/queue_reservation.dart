@@ -10,6 +10,7 @@ class QueueReservation {
     required this.position,
     required this.estimatedWaitMinutes,
     required this.joinedAt,
+    this.isInConsultation = false,
   });
 
   final String id;
@@ -25,7 +26,18 @@ class QueueReservation {
   final int estimatedWaitMinutes;
   final DateTime joinedAt;
 
-  bool get isNext => position == 0;
+  /// Whether the clinic has already called this patient in and they are
+  /// with the clinician now.
+  ///
+  /// Distinct from [isNext], and the distinction matters on screen: a
+  /// patient who has been called in is *not* "next", they are being
+  /// seen, and telling them to keep waiting would send them back to
+  /// their chair.
+  final bool isInConsultation;
+
+  /// Whether this patient is at the front of the line but not yet
+  /// called in.
+  bool get isNext => position == 0 && !isInConsultation;
 
   @override
   bool operator ==(Object other) => other is QueueReservation && other.id == id;

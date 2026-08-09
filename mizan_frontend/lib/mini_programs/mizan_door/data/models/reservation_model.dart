@@ -19,6 +19,9 @@ class ReservationModel {
         'estimated_wait_minutes',
       ),
       joinedAt: _requireDate(json, 'joined_at'),
+      // Absent on a server that predates the consultation stage, which
+      // is indistinguishable from "still waiting" and renders the same.
+      isInConsultation: json['status'] == 'in_consultation',
     );
   }
 
